@@ -4,6 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/services.dart';
 
+import 'app_theme.dart';
+import 'camera_control.dart';
+import 'widgets/bottom_info_bar.dart';
+import 'widgets/camera_settings_drawer.dart';
+import 'widgets/canvas_view.dart';
+import 'widgets/left_toolbar.dart';
+import 'widgets/mini_map.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([
@@ -23,9 +31,18 @@ class EvaApp extends StatelessWidget {
       title: 'EVA - Whole Slide Imaging',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        colorScheme: ColorScheme.dark(
-          primary: Colors.blueAccent,
-          surface: Colors.black,
+        scaffoldBackgroundColor: kBgColor,
+        colorScheme: const ColorScheme.dark(
+          primary: kAccent,
+          surface: kPanelColor,
+        ),
+        snackBarTheme: SnackBarThemeData(
+          backgroundColor: kPanelColor,
+          contentTextStyle: const TextStyle(color: kTextSecondary),
+          shape: RoundedRectangleBorder(
+            side: const BorderSide(color: kBorderColor),
+            borderRadius: BorderRadius.circular(6),
+          ),
         ),
       ),
       home: const CameraScreen(),
@@ -33,117 +50,7 @@ class EvaApp extends StatelessWidget {
   }
 }
 
-// ── Platform channel helper ─────────────────────────────────────────────
-
-class CameraControl {
-  static const _method = MethodChannel('com.example.eva/control');
-  static const _events = EventChannel('com.example.eva/events');
-
-  static Future<bool> requestPermission() async {
-    final granted = await _method.invokeMethod<bool>('requestPermission');
-    return granted ?? false;
-  }
-
-  static Future<Map<String, dynamic>> startCamera() async {
-    final result = await _method.invokeMethod<Map>('startCamera');
-    return Map<String, dynamic>.from(result ?? {});
-  }
-
-  static Future<void> stopCamera() => _method.invokeMethod('stopCamera');
-
-  static Future<String> saveFrame() async {
-    final path = await _method.invokeMethod<String>('saveFrame');
-    return path ?? '';
-  }
-
-  static Future<bool> lockWhiteBalance() async {
-    final ok = await _method.invokeMethod<bool>('lockWhiteBalance');
-    return ok ?? false;
-  }
-
-  static Future<bool> unlockWhiteBalance() async {
-    final ok = await _method.invokeMethod<bool>('unlockWhiteBalance');
-    return ok ?? false;
-  }
-
-  static Future<bool> isWbLocked() async {
-    final locked = await _method.invokeMethod<bool>('isWbLocked');
-    return locked ?? false;
-  }
-
-  static Future<void> setAfEnabled(bool enabled) =>
-      _method.invokeMethod('setAfEnabled', {'enabled': enabled});
-
-  static Future<void> setAeEnabled(bool enabled) =>
-      _method.invokeMethod('setAeEnabled', {'enabled': enabled});
-
-  static Future<double> getMinFocusDistance() async {
-    final result = await _method.invokeMethod<double>('getMinFocusDistance');
-    return result ?? 0.0;
-  }
-
-  static Future<double> getCurrentFocusDistance() async {
-    final result = await _method.invokeMethod<double>(
-      'getCurrentFocusDistance',
-    );
-    return result ?? 0.0;
-  }
-
-  static Future<void> setFocusDistance(double distance) =>
-      _method.invokeMethod('setFocusDistance', {'distance': distance});
-
-  static Future<double> getExposureOffsetStep() async {
-    final result = await _method.invokeMethod<double>('getExposureOffsetStep');
-    return result ?? 0.0;
-  }
-
-  static Future<List<int>> getExposureOffsetRange() async {
-    final result = await _method.invokeMethod<List>('getExposureOffsetRange');
-    return result?.cast<int>() ?? [0, 0];
-  }
-
-  static Future<void> setExposureOffset(int index) =>
-      _method.invokeMethod('setExposureOffset', {'index': index});
-
-  static Future<List<int>> getExposureTimeRangeNs() async {
-    final result = await _method.invokeMethod<List>('getExposureTimeRangeNs');
-    return result?.map((e) => (e as num).toInt()).toList() ??
-        [1000000, 1000000000];
-  }
-
-  static Future<void> setExposureTimeNs(int ns) =>
-      _method.invokeMethod('setExposureTimeNs', {'ns': ns});
-
-  static Future<List<int>> getIsoRange() async {
-    final result = await _method.invokeMethod<List>('getIsoRange');
-    return result?.map((e) => (e as num).toInt()).toList() ?? [100, 3200];
-  }
-
-  static Future<void> setIso(int iso) =>
-      _method.invokeMethod('setIso', {'iso': iso});
-
-  static Future<double> getMinZoomRatio() async {
-    final result = await _method.invokeMethod<double>('getMinZoomRatio');
-    return result ?? 1.0;
-  }
-
-  static Future<double> getMaxZoomRatio() async {
-    final result = await _method.invokeMethod<double>('getMaxZoomRatio');
-    return result ?? 1.0;
-  }
-
-  static Future<void> setZoomRatio(double ratio) =>
-      _method.invokeMethod('setZoomRatio', {'ratio': ratio});
-
-  static Future<Map<String, dynamic>> getResolution() async {
-    final result = await _method.invokeMethod<Map>('getResolution');
-    return Map<String, dynamic>.from(result ?? {});
-  }
-
-  /// Stream of status events from Kotlin.
-  static Stream<Map<dynamic, dynamic>> get eventStream =>
-      _events.receiveBroadcastStream().map((e) => e as Map<dynamic, dynamic>);
-}
+// CameraControl moved to lib/camera_control.dart
 
 // ── Camera screen ───────────────────────────────────────────────────────
 
@@ -155,11 +62,11 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
+  // ── Permission / camera lifecycle ──────────────────────────────────
   bool _permissionGranted = false;
   bool _cameraStarted = false;
-  bool _saving = false;
 
-  // Camera controls state
+  // ── Camera controls ────────────────────────────────────────────────
   bool _afEnabled = true;
   bool _aeEnabled = true;
   bool _wbLocked = false;
@@ -167,17 +74,13 @@ class _CameraScreenState extends State<CameraScreen> {
   // Focus
   double _minFocusDistance = 0.0;
   double _currentFocusDistance = 0.0;
-  bool _showFocusSlider = false;
-  Timer? _focusSliderTimer;
 
-  // Exposure (EV offset, shown when AE is on)
+  // EV offset (AE-on path)
   int _exposureOffsetIndex = 0;
   List<int> _exposureOffsetRange = [0, 0];
   double _exposureOffsetStep = 0.0;
-  bool _showExposureSlider = false;
-  Timer? _exposureSliderTimer;
 
-  // Manual sensor exposure + ISO (shown when AE is off)
+  // Manual sensor exposure + ISO (AE-off path)
   int _exposureTimeNs = 1000000; // 1 ms default
   List<int> _exposureTimeRangeNs = [1000000, 1000000000];
   int _isoValue = 200;
@@ -187,22 +90,25 @@ class _CameraScreenState extends State<CameraScreen> {
   double _minZoomRatio = 1.0;
   double _maxZoomRatio = 1.0;
   double _currentZoomRatio = 1.0;
-  bool _showZoomSlider = false;
-  Timer? _zoomSliderTimer;
 
-  // Resolution info
+  // Resolution info (display only)
   String _captureResolution = '--';
   String _analysisResolution = '--';
 
-  // Status / diagnostics
-  String _statusText = 'Initializing...';
+  // ── EventChannel state ────────────────────────────────────────────
   int _frameCount = 0;
   double _fps = 0.0;
-
-  // Settings tray
-  bool _settingsOpen = false;
-
   StreamSubscription<Map<dynamic, dynamic>>? _eventSub;
+
+  // ── UI state ──────────────────────────────────────────────────────
+  bool _isScanning = false;
+  bool _showCanvas = false;
+  bool _settingsDrawerOpen = false;
+
+  // ── Session timer ─────────────────────────────────────────────────
+  int _sessionSeconds = 0;
+  int _stitchedCount = 0;
+  Timer? _sessionTimer;
 
   @override
   void initState() {
@@ -213,61 +119,67 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _initCamera() async {
     final granted = await CameraControl.requestPermission();
     if (!mounted) return;
-    setState(() {
-      _permissionGranted = granted;
-      _statusText = granted ? 'Permission granted' : 'Permission denied';
-    });
+    setState(() => _permissionGranted = granted);
     if (!granted) return;
     await _startCamera();
   }
 
   Future<void> _startCamera() async {
     try {
-      setState(() => _statusText = 'Starting camera...');
       final info = await CameraControl.startCamera();
       if (!mounted) return;
 
+      final cw = info['captureWidth'] ?? '--';
+      final ch = info['captureHeight'] ?? '--';
+      final aw = info['analysisWidth'] ?? '--';
+      final ah = info['analysisHeight'] ?? '--';
+
       setState(() {
         _cameraStarted = true;
-        final cw = info['captureWidth'] ?? '--';
-        final ch = info['captureHeight'] ?? '--';
-        final aw = info['analysisWidth'] ?? '--';
-        final ah = info['analysisHeight'] ?? '--';
         _captureResolution = '${cw}x$ch';
         _analysisResolution = '${aw}x$ah';
-        _statusText = 'AF: ON | AE: ON | WB: Auto';
       });
 
-      // Fetch device capabilities
-      final minFocus = await CameraControl.getMinFocusDistance();
-      final exposureRange = await CameraControl.getExposureOffsetRange();
-      final exposureStep = await CameraControl.getExposureOffsetStep();
-      final expTimeRange = await CameraControl.getExposureTimeRangeNs();
-      final isoRange = await CameraControl.getIsoRange();
-      final minZoom = await CameraControl.getMinZoomRatio();
-      final maxZoom = await CameraControl.getMaxZoomRatio();
+      // Fetch device capability ranges in parallel
+      final results = await Future.wait([
+        CameraControl.getMinFocusDistance(),
+        CameraControl.getExposureOffsetStep().then((v) => v),
+        CameraControl.getMinZoomRatio(),
+        CameraControl.getMaxZoomRatio(),
+      ]);
+      final listResults = await Future.wait([
+        CameraControl.getExposureOffsetRange(),
+        CameraControl.getExposureTimeRangeNs(),
+        CameraControl.getIsoRange(),
+      ]);
 
-      if (mounted) {
-        setState(() {
-          _minFocusDistance = minFocus;
-          _currentFocusDistance = minFocus / 2;
-          _exposureOffsetRange = exposureRange;
-          _exposureOffsetStep = exposureStep;
-          _exposureOffsetIndex = 0;
-          _exposureTimeRangeNs = expTimeRange;
-          _exposureTimeNs = expTimeRange[0].clamp(1000000, expTimeRange[1]);
-          _isoRange = isoRange;
-          _isoValue = isoRange[0].clamp(200, isoRange[1]);
-          _minZoomRatio = minZoom;
-          _maxZoomRatio = maxZoom;
-          _currentZoomRatio = minZoom;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _minFocusDistance = results[0];
+        _currentFocusDistance = (_minFocusDistance / 2).clamp(
+          0.0,
+          _minFocusDistance,
+        );
+        _exposureOffsetStep = results[1];
+        _minZoomRatio = results[2];
+        _maxZoomRatio = results[3];
+        _currentZoomRatio = _minZoomRatio;
+
+        _exposureOffsetRange = listResults[0];
+        _exposureOffsetIndex = 0;
+        _exposureTimeRangeNs = listResults[1];
+        _exposureTimeNs = _exposureTimeRangeNs[0].clamp(
+          1000000,
+          _exposureTimeRangeNs[1],
+        );
+        _isoRange = listResults[2];
+        _isoValue = _isoRange[0].clamp(200, _isoRange[1]);
+      });
 
       _listenToEvents();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _statusText = 'Camera error: $e');
+      _showError('Camera error: $e');
     }
   }
 
@@ -285,115 +197,94 @@ class _CameraScreenState extends State<CameraScreen> {
           _fps = (data['fps'] as num?)?.toDouble() ?? _fps;
         });
       } else if (tag == 'cameraSettings') {
-        setState(() => _statusText = message);
+        debugPrint('cameraSettings: $message');
       } else if (type == 'warning') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.orange[800],
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        _showWarning(message);
       } else if (type == 'error') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
-        );
+        _showError(message);
       }
     }, onError: (e) => debugPrint('Event stream error: $e'));
   }
 
   @override
   void dispose() {
-    _focusSliderTimer?.cancel();
-    _exposureSliderTimer?.cancel();
-    _zoomSliderTimer?.cancel();
     _eventSub?.cancel();
+    _sessionTimer?.cancel();
     CameraControl.stopCamera();
     super.dispose();
   }
 
-  // ── Actions ───────────────────────────────────────────────────────────
+  // ── Snackbar helpers ──────────────────────────────────────────────
 
-  Future<void> _saveFrame() async {
-    if (_saving) return;
-    setState(() => _saving = true);
-    try {
-      final path = await CameraControl.saveFrame();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Saved: $path'),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: Colors.red[900],
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
-  Future<void> _toggleAf() async {
-    final prev = _afEnabled;
-    double nextFocus = _currentFocusDistance;
-    if (_afEnabled) {
-      nextFocus = await CameraControl.getCurrentFocusDistance();
-    }
-    setState(() {
-      _afEnabled = !_afEnabled;
-      if (!_afEnabled && _minFocusDistance > 0) {
-        _currentFocusDistance = nextFocus;
-        _showFocusSlider = true;
-        _hideOtherSliders('focus');
-        _resetFocusSliderTimer();
-      } else {
-        _showFocusSlider = false;
-        _focusSliderTimer?.cancel();
-      }
-    });
-    try {
-      await CameraControl.setAfEnabled(_afEnabled);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _afEnabled = prev);
-    }
+  void _showWarning(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: Colors.orange[900],
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
-  Future<void> _toggleAe() async {
-    final prev = _aeEnabled;
-    setState(() {
-      _aeEnabled = !_aeEnabled;
-      _showExposureSlider = !_aeEnabled;
-      _hideOtherSliders('exposure');
-      if (_showExposureSlider) _resetExposureSliderTimer();
-    });
-    try {
-      await CameraControl.setAeEnabled(_aeEnabled);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _aeEnabled = prev);
-    }
-  }
+  // ── Camera actions ────────────────────────────────────────────────
 
   Future<void> _tapToLockWb() async {
     try {
       await CameraControl.lockWhiteBalance();
       if (mounted) setState(() => _wbLocked = true);
     } catch (e) {
+      _showWarning('WB lock failed: $e');
+    }
+  }
+
+  Future<void> _toggleAe() async {
+    final prev = _aeEnabled;
+    setState(() => _aeEnabled = !_aeEnabled);
+    try {
+      await CameraControl.setAeEnabled(_aeEnabled);
+    } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('WB lock failed: $e'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      setState(() => _aeEnabled = prev);
+      _showError('AE toggle failed: $e');
+    }
+  }
+
+  Future<void> _toggleAf() async {
+    final prev = _afEnabled;
+    if (_afEnabled) {
+      try {
+        final dist = await CameraControl.getCurrentFocusDistance();
+        if (mounted) setState(() => _currentFocusDistance = dist);
+      } catch (_) {}
+    }
+    setState(() => _afEnabled = !_afEnabled);
+    try {
+      await CameraControl.setAfEnabled(_afEnabled);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _afEnabled = prev);
+      _showError('AF toggle failed: $e');
+    }
+  }
+
+  Future<void> _lockWb() async {
+    try {
+      await CameraControl.lockWhiteBalance();
+      if (mounted) setState(() => _wbLocked = true);
+    } catch (e) {
+      _showWarning('WB lock failed: $e');
     }
   }
 
@@ -402,234 +293,177 @@ class _CameraScreenState extends State<CameraScreen> {
       await CameraControl.unlockWhiteBalance();
       if (mounted) setState(() => _wbLocked = false);
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('WB unlock failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showError('WB unlock failed: $e');
     }
   }
 
-  void _onFocusChanged(double value) {
-    setState(() {
-      _currentFocusDistance = value;
-      _showFocusSlider = true;
-      _hideOtherSliders('focus');
-    });
-    _resetFocusSliderTimer();
-    CameraControl.setFocusDistance(value);
+  void _onIsoChanged(int iso) {
+    setState(() => _isoValue = iso);
+    CameraControl.setIso(iso);
   }
 
-  void _onExposureChanged(double value) {
-    final rounded = value.round();
-    setState(() {
-      _exposureOffsetIndex = rounded;
-      _showExposureSlider = true;
-      _hideOtherSliders('exposure');
-    });
-    _resetExposureSliderTimer();
-    CameraControl.setExposureOffset(rounded);
+  void _onExposureTimeNsChanged(int ns) {
+    setState(() => _exposureTimeNs = ns);
+    CameraControl.setExposureTimeNs(ns);
   }
 
-  void _onExposureTimeChanged(double value) {
-    setState(() {
-      _exposureTimeNs = value.toInt();
-      _showExposureSlider = true;
-      _hideOtherSliders('exposure');
-    });
-    _resetExposureSliderTimer();
-    CameraControl.setExposureTimeNs(_exposureTimeNs);
+  void _onEvIndexChanged(int index) {
+    setState(() => _exposureOffsetIndex = index);
+    CameraControl.setExposureOffset(index);
   }
 
-  void _onIsoChanged(double value) {
-    setState(() {
-      _isoValue = value.toInt();
-      _showExposureSlider = true;
-      _hideOtherSliders('exposure');
-    });
-    _resetExposureSliderTimer();
-    CameraControl.setIso(_isoValue);
+  void _onFocusChanged(double dist) {
+    setState(() => _currentFocusDistance = dist);
+    CameraControl.setFocusDistance(dist);
   }
 
-  void _onZoomChanged(double value) {
-    setState(() {
-      _currentZoomRatio = value;
-      _showZoomSlider = true;
-      _hideOtherSliders('zoom');
-    });
-    _resetZoomSliderTimer();
-    CameraControl.setZoomRatio(value);
+  void _onZoomChanged(double ratio) {
+    setState(() => _currentZoomRatio = ratio);
+    CameraControl.setZoomRatio(ratio);
   }
 
-  void _toggleZoomSlider() {
-    setState(() {
-      _showZoomSlider = !_showZoomSlider;
-      if (_showZoomSlider) {
-        _hideOtherSliders('zoom');
-        _resetZoomSliderTimer();
-      }
-    });
-  }
+  // ── Scan / session ────────────────────────────────────────────────
 
-  void _hideOtherSliders(String keep) {
-    if (keep != 'focus') {
-      _showFocusSlider = false;
-      _focusSliderTimer?.cancel();
-    }
-    if (keep != 'exposure') {
-      _showExposureSlider = false;
-      _exposureSliderTimer?.cancel();
-    }
-    if (keep != 'zoom') {
-      _showZoomSlider = false;
-      _zoomSliderTimer?.cancel();
+  void _toggleScan() {
+    setState(() => _isScanning = !_isScanning);
+    if (_isScanning) {
+      _sessionTimer?.cancel();
+      _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() => _sessionSeconds++);
+      });
+    } else {
+      _sessionTimer?.cancel();
     }
   }
 
-  void _resetFocusSliderTimer() {
-    _focusSliderTimer?.cancel();
-    _focusSliderTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _showFocusSlider = false);
+  void _onReset() {
+    setState(() {
+      _isScanning = false;
+      _stitchedCount = 0;
+      _sessionSeconds = 0;
+      _showCanvas = false;
     });
+    _sessionTimer?.cancel();
   }
 
-  void _resetExposureSliderTimer() {
-    _exposureSliderTimer?.cancel();
-    _exposureSliderTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _showExposureSlider = false);
-    });
+  void _onExport() {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Export not yet implemented')));
   }
 
-  void _resetZoomSliderTimer() {
-    _zoomSliderTimer?.cancel();
-    _zoomSliderTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _showZoomSlider = false);
-    });
-  }
-
-  // ── Build ─────────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
+      backgroundColor: kBgColor,
+      body: Row(
         children: [
-          // ── Camera preview (tap to lock WB) ──
-          if (_permissionGranted)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _cameraStarted ? _tapToLockWb : null,
-                child: _buildCameraPreview(),
-              ),
-            )
-          else
-            const Center(
-              child: Text(
-                'Camera permission required',
-                style: TextStyle(color: Colors.white, fontSize: 18),
-              ),
+          // ── Left toolbar ──
+          LeftToolbar(
+            isScanning: _isScanning,
+            showCanvas: _showCanvas,
+            settingsOpen: _settingsDrawerOpen,
+            canExport: false,
+            onToggleScan: _toggleScan,
+            onToggleCanvas: () => setState(() => _showCanvas = !_showCanvas),
+            onToggleSettings: () =>
+                setState(() => _settingsDrawerOpen = !_settingsDrawerOpen),
+            onReset: _onReset,
+            onExport: _onExport,
+          ),
+
+          // ── Main content area ──
+          Expanded(
+            child: Stack(
+              children: [
+                // Camera preview (always rendered behind everything)
+                if (_permissionGranted)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      onTap: _cameraStarted ? _tapToLockWb : null,
+                      child: _buildCameraPreview(),
+                    ),
+                  )
+                else
+                  const Center(
+                    child: Text(
+                      'Camera permission required',
+                      style: TextStyle(color: kTextSecondary, fontSize: 16),
+                    ),
+                  ),
+
+                // Canvas overlay (toggled by toolbar)
+                if (_showCanvas) const Positioned.fill(child: CanvasView()),
+
+                // MiniMap — top right
+                const Positioned(
+                  top: 8,
+                  right: 8,
+                  child: MiniMap(frameCount: 0),
+                ),
+
+                // Settings drawer + info bar pinned to bottom
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_cameraStarted)
+                        CameraSettingsDrawer(
+                          isOpen: _settingsDrawerOpen,
+                          aeEnabled: _aeEnabled,
+                          afEnabled: _afEnabled,
+                          wbLocked: _wbLocked,
+                          isoValue: _isoValue,
+                          isoRange: _isoRange,
+                          exposureTimeNs: _exposureTimeNs,
+                          exposureTimeRangeNs: _exposureTimeRangeNs,
+                          exposureOffsetIndex: _exposureOffsetIndex,
+                          exposureOffsetRange: _exposureOffsetRange,
+                          exposureOffsetStep: _exposureOffsetStep,
+                          focusDistance: _currentFocusDistance,
+                          minFocusDistance: _minFocusDistance,
+                          zoomRatio: _currentZoomRatio,
+                          minZoomRatio: _minZoomRatio,
+                          maxZoomRatio: _maxZoomRatio,
+                          onToggleAe: _toggleAe,
+                          onToggleAf: _toggleAf,
+                          onLockWb: _lockWb,
+                          onUnlockWb: _unlockWb,
+                          onIsoChanged: _onIsoChanged,
+                          onExposureTimeNsChanged: _onExposureTimeNsChanged,
+                          onEvIndexChanged: _onEvIndexChanged,
+                          onFocusChanged: _onFocusChanged,
+                          onZoomChanged: _onZoomChanged,
+                        ),
+                      BottomInfoBar(
+                        isScanning: _isScanning,
+                        frameCount: _frameCount,
+                        stitchedCount: _stitchedCount,
+                        totalTarget: 0,
+                        coveragePct: 0.0,
+                        sessionSeconds: _sessionSeconds,
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Resolution debug badge (top-left, subtle)
+                if (_cameraStarted)
+                  Positioned(top: 8, left: 8, child: _buildResolutionBadge()),
+              ],
             ),
-
-          // ── Settings button ──
-          if (_cameraStarted)
-            Positioned(
-              left: 8,
-              top: MediaQuery.of(context).padding.top + 8,
-              child: _buildSettingsButton(),
-            ),
-
-          // ── Background tap to close settings ──
-          if (_settingsOpen)
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onTap: () => setState(() => _settingsOpen = false),
-              ),
-            ),
-
-          // ── Settings tray ──
-          if (_settingsOpen) _buildSettingsTray(),
-
-          // ── Sliders ──
-          if (_showFocusSlider && !_afEnabled && _minFocusDistance > 0)
-            _buildVerticalSlider(
-              value: _currentFocusDistance,
-              min: 0.0,
-              max: _minFocusDistance,
-              color: Colors.greenAccent,
-              label: '${_currentFocusDistance.toStringAsFixed(1)} D',
-              onChanged: _onFocusChanged,
-              onChangeEnd: (_) => _resetFocusSliderTimer(),
-            ),
-
-          if (_showExposureSlider &&
-              !_aeEnabled &&
-              _exposureTimeRangeNs[1] > _exposureTimeRangeNs[0])
-            _buildVerticalSlider(
-              value: _exposureTimeNs.toDouble().clamp(
-                _exposureTimeRangeNs[0].toDouble(),
-                _exposureTimeRangeNs[1].toDouble(),
-              ),
-              min: _exposureTimeRangeNs[0].toDouble(),
-              max: _exposureTimeRangeNs[1].toDouble(),
-              color: Colors.amberAccent,
-              label: '${(_exposureTimeNs / 1000).round()} µs',
-              onChanged: _onExposureTimeChanged,
-              onChangeEnd: (_) => _resetExposureSliderTimer(),
-            ),
-
-          if (_showExposureSlider && !_aeEnabled && _isoRange[1] > _isoRange[0])
-            _buildVerticalSlider(
-              left: 134,
-              value: _isoValue.toDouble().clamp(
-                _isoRange[0].toDouble(),
-                _isoRange[1].toDouble(),
-              ),
-              min: _isoRange[0].toDouble(),
-              max: _isoRange[1].toDouble(),
-              color: Colors.orangeAccent,
-              label: 'ISO $_isoValue',
-              onChanged: _onIsoChanged,
-              onChangeEnd: (_) => _resetExposureSliderTimer(),
-            ),
-
-          if (_showExposureSlider &&
-              _aeEnabled &&
-              _exposureOffsetRange.length == 2 &&
-              _exposureOffsetRange[1] > _exposureOffsetRange[0])
-            _buildVerticalSlider(
-              value: _exposureOffsetIndex.toDouble(),
-              min: _exposureOffsetRange[0].toDouble(),
-              max: _exposureOffsetRange[1].toDouble(),
-              divisions: (_exposureOffsetRange[1] - _exposureOffsetRange[0])
-                  .toInt(),
-              color: Colors.amberAccent,
-              label:
-                  '${(_exposureOffsetIndex * _exposureOffsetStep).toStringAsFixed(1)} EV',
-              onChanged: _onExposureChanged,
-              onChangeEnd: (_) => _resetExposureSliderTimer(),
-            ),
-
-          if (_showZoomSlider)
-            _buildVerticalSlider(
-              value: _currentZoomRatio,
-              min: _minZoomRatio,
-              max: _maxZoomRatio,
-              color: Colors.blueAccent,
-              label: '${_currentZoomRatio.toStringAsFixed(1)}x',
-              onChanged: _onZoomChanged,
-              onChangeEnd: (_) => _resetZoomSliderTimer(),
-            ),
-
-          // ── Bottom status bar ──
-          Positioned(left: 0, right: 0, bottom: 0, child: _buildBottomBar()),
+          ),
         ],
       ),
     );
   }
+
+  // ── Helper widgets ────────────────────────────────────────────────
 
   Widget _buildCameraPreview() {
     return PlatformViewLink(
@@ -654,282 +488,22 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  Widget _buildSettingsButton() {
-    return GestureDetector(
-      onTap: () => setState(() => _settingsOpen = !_settingsOpen),
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.5),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          _settingsOpen ? Icons.close : Icons.settings,
-          color: Colors.white,
-          size: 22,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSettingsTray() {
-    return Positioned(
-      left: 8,
-      top: MediaQuery.of(context).padding.top + 60,
-      child: Container(
-        width: 200,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.85),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // AF toggle
-            _SettingsRow(
-              icon: _afEnabled
-                  ? Icons.center_focus_strong
-                  : Icons.center_focus_weak,
-              label: _afEnabled ? 'AF: ON' : 'AF: OFF',
-              color: _afEnabled ? Colors.greenAccent : Colors.white54,
-              onTap: _toggleAf,
-            ),
-            const SizedBox(height: 8),
-
-            // AE toggle
-            _SettingsRow(
-              icon: _aeEnabled ? Icons.exposure : Icons.exposure_outlined,
-              label: _aeEnabled ? 'AE: ON' : 'AE: OFF',
-              color: _aeEnabled ? Colors.amberAccent : Colors.white54,
-              onTap: _toggleAe,
-            ),
-            const SizedBox(height: 8),
-
-            // Zoom
-            _SettingsRow(
-              icon: Icons.zoom_in,
-              label: 'Zoom: ${_currentZoomRatio.toStringAsFixed(1)}x',
-              color: Colors.blueAccent,
-              onTap: _toggleZoomSlider,
-            ),
-            const SizedBox(height: 8),
-
-            // WB status / unlock
-            _SettingsRow(
-              icon: _wbLocked ? Icons.lock : Icons.wb_auto,
-              label: _wbLocked ? 'WB: Locked' : 'WB: Auto',
-              color: _wbLocked ? Colors.orange : Colors.white54,
-              onTap: _wbLocked ? _unlockWb : null,
-              subtitle: _wbLocked ? 'Tap to unlock' : 'Tap preview to lock',
-            ),
-            const SizedBox(height: 8),
-
-            // Resolution info
-            const Divider(color: Colors.white24, height: 1),
-            const SizedBox(height: 8),
-            Text(
-              'Capture: $_captureResolution',
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 11,
-                fontFamily: 'monospace',
-              ),
-            ),
-            Text(
-              'Analysis: $_analysisResolution',
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVerticalSlider({
-    required double value,
-    required double min,
-    required double max,
-    required Color color,
-    required String label,
-    required ValueChanged<double> onChanged,
-    required ValueChanged<double> onChangeEnd,
-    int? divisions,
-    double left = 60,
-  }) {
-    return Positioned(
-      left: left,
-      top: MediaQuery.of(context).size.height / 2 - 150,
-      child: Container(
-        height: 300,
-        width: 64,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(30),
-        ),
-        child: RotatedBox(
-          quarterTurns: 3,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    activeTrackColor: color,
-                    inactiveTrackColor: Colors.white24,
-                    thumbColor: color,
-                    overlayColor: color.withValues(alpha: 0.2),
-                    trackHeight: 4.0,
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 12,
-                    ),
-                  ),
-                  child: Slider(
-                    value: value,
-                    min: min,
-                    max: max,
-                    divisions: divisions,
-                    onChanged: onChanged,
-                    onChangeEnd: onChangeEnd,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: const TextStyle(color: Colors.white70, fontSize: 11),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomBar() {
+  Widget _buildResolutionBadge() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7)),
-      child: SafeArea(
-        top: false,
-        child: Row(
-          children: [
-            // Status info
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _statusText,
-                    style: const TextStyle(color: Colors.amber, fontSize: 12),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Frames: $_frameCount  |  ${_fps.toStringAsFixed(1)} FPS',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Save button
-            SizedBox(
-              height: 40,
-              child: ElevatedButton.icon(
-                onPressed: _cameraStarted && !_saving ? _saveFrame : null,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.save, size: 18),
-                label: Text(_saving ? 'Saving...' : 'Save'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blueAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                ),
-              ),
-            ),
-          ],
-        ),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: kPanelColor.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: kBorderColor),
       ),
-    );
-  }
-}
-
-// ── Settings row widget ─────────────────────────────────────────────────
-
-class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({
-    required this.icon,
-    required this.label,
-    required this.color,
-    this.onTap,
-    this.subtitle,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback? onTap;
-  final String? subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: color),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (subtitle != null)
-                    Text(
-                      subtitle!,
-                      style: const TextStyle(
-                        color: Colors.white38,
-                        fontSize: 10,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+      child: Text(
+        'Cap: $_captureResolution  |  Ana: $_analysisResolution'
+        '  |  ${_fps.toStringAsFixed(1)} fps',
+        style: const TextStyle(
+          color: kTextMuted,
+          fontSize: 9,
+          fontFamily: 'monospace',
+          letterSpacing: 0.3,
         ),
       ),
     );

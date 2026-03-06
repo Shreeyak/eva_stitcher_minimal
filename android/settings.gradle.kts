@@ -23,4 +23,6 @@ plugins {
 }
 
 include(":app", ":opencv")
+
+project(":opencv").projectDir = file("opencv/sdk")
 project(":opencv").projectDir = file("opencv/sdk")
