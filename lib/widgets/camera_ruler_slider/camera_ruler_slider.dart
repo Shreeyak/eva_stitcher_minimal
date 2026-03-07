@@ -52,6 +52,12 @@ class CameraRulerSlider extends StatefulWidget {
   /// Set this to match the container background so the fade looks seamless.
   final Color fadeColor;
 
+  /// Optional icon shown at the left (min) end of the slider.
+  final Widget? leftIcon;
+
+  /// Optional icon shown at the right (max) end of the slider.
+  final Widget? rightIcon;
+
   const CameraRulerSlider({
     super.key,
     required this.config,
@@ -59,6 +65,8 @@ class CameraRulerSlider extends StatefulWidget {
     required this.onChanged,
     this.enableInertia = false,
     this.fadeColor = Colors.black,
+    this.leftIcon,
+    this.rightIcon,
   });
 
   @override
@@ -93,6 +101,11 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   /// Y-offset from widget top where the tick strip begins.
   /// The label area lives above this.
   static const double _tickTop = 24;
+
+  /// Horizontal padding reserved for the end icons on each side.
+  /// Sized ~= total widget height (44 px) + a little breathing room.
+  /// Ticks and labels are clipped to the inner [_kIconPad, width-_kIconPad] zone.
+  static const double _kIconPad = 52.0;
 
   /// Fractional index — smooth during drag, integer-aligned at rest.
   double get _visualIndex => _visualPercent * (widget.config.stopCount - 1);
@@ -137,18 +150,23 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
     // Canvas bounding rect is required — omitting it clips lines outside the image origin.
     final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
 
+    // Warm salmon/rose tick color matching the reference camera UI.
+    const Color tickBase = Color(0xFFD4847A);
+
     final minor = Paint()
       ..strokeWidth = 1.5
-      ..color = Colors.white.withValues(alpha: 0.35);
+      ..color = tickBase.withValues(alpha: 0.45)
+      ..strokeCap = StrokeCap.round;
 
     final major = Paint()
       ..strokeWidth = 2
-      ..color = Colors.white.withValues(alpha: 0.85);
+      ..color = tickBase.withValues(alpha: 0.85)
+      ..strokeCap = StrokeCap.round;
 
     for (int i = 0; i < n; i++) {
       final dx = i * tickSpacing;
       final isMajor = i % widget.config.majorTickEvery == 0;
-      // Bottom-aligned: ticks grow upward from the bottom edge.
+      // Bottom-aligned: ticks grow upward from the bottom baseline.
       final tickH = isMajor ? 14.0 : 7.0;
       canvas.drawLine(
         Offset(dx, height),
@@ -255,9 +273,12 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
       height: _totalHeight,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // dx computed here so Transform.translate gets it; compositor moves
-          // the texture layer without calling paint() each frame.
-          final dx = constraints.maxWidth / 2 - _visualIndex * tickSpacing;
+          // Ruler center is the center of the inner (non-icon) area.
+          // Since inner zone is symmetric, the center equals maxWidth/2.
+          final innerDx = constraints.maxWidth / 2 - _visualIndex * tickSpacing;
+          // Equivalent position in the local coordinate of the inner clip
+          // (origin shifted right by _kIconPad).
+          final localDx = innerDx - _kIconPad;
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -266,69 +287,103 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
               updateDrag(d.delta.dx);
             },
             onHorizontalDragEnd: (_) => onDragEnd(),
-            child: ClipRect(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  // Tick strip — positioned at _tickTop so label area sits above it.
-                  Positioned(
-                    left: dx,
-                    top: _tickTop,
-                    height: _cacheHeight,
-                    child: RawImage(
-                      image: rulerCache,
-                      fit: BoxFit.none,
-                      alignment: Alignment.topLeft,
-                    ),
-                  ),
-
-                  // Labels painted on top; only major ticks rendered, large center value.
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _LabelsPainter(
-                          visualIndex: _visualIndex,
-                          config: widget.config,
-                          rulerOffset: dx,
-                          tickTop: _tickTop,
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Edge fade — blends into fadeColor so the capsule clip
-                  // looks seamless rather than abruptly cutting ticks.
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              widget.fadeColor.withValues(alpha: 0.80),
-                              widget.fadeColor.withValues(alpha: 0.60),
-                              widget.fadeColor.withValues(alpha: 0),
-                              widget.fadeColor.withValues(alpha: 0),
-                              widget.fadeColor.withValues(alpha: 0.60),
-                              widget.fadeColor.withValues(alpha: 0.80),
-                            ],
-                            stops: const [0, 0.18, 0.32, 0.68, 0.82, 1],
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // ── Inner ruler zone (ticks + labels) ────────────────────
+                // Clipped to [_kIconPad, width-_kIconPad] so the scrolling
+                // tick strip never renders under the end icons.
+                Positioned(
+                  left: _kIconPad,
+                  right: _kIconPad,
+                  top: 0,
+                  bottom: 0,
+                  child: ClipRect(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Tick strip.
+                        Positioned(
+                          left: localDx,
+                          top: _tickTop,
+                          height: _cacheHeight,
+                          child: RawImage(
+                            image: rulerCache,
+                            fit: BoxFit.none,
+                            alignment: Alignment.topLeft,
                           ),
                         ),
+                        // Labels — coordinate system is local (inner clip).
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: CustomPaint(
+                              painter: _LabelsPainter(
+                                visualIndex: _visualIndex,
+                                config: widget.config,
+                                rulerOffset: localDx,
+                                tickTop: _tickTop,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // ── Edge fade (full-width) ────────────────────────────────
+                // Covers the icon zones so ticks fade cleanly into the capsule edges.
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            widget.fadeColor.withValues(alpha: 0.95),
+                            widget.fadeColor.withValues(alpha: 0.75),
+                            widget.fadeColor.withValues(alpha: 0),
+                            widget.fadeColor.withValues(alpha: 0),
+                            widget.fadeColor.withValues(alpha: 0.75),
+                            widget.fadeColor.withValues(alpha: 0.95),
+                          ],
+                          stops: const [0, 0.12, 0.22, 0.78, 0.88, 1],
+                        ),
                       ),
                     ),
                   ),
+                ),
 
-                  // Center indicator — aligned to the tick strip, not the full widget.
-                  Positioned(
-                    top: _tickTop,
-                    bottom: _totalHeight - _tickTop - _cacheHeight,
-                    left: 0,
-                    right: 0,
-                    child: const Center(child: _Indicator()),
+                // ── Center indicator (capsule) ────────────────────────────
+                // bottom:2 pins capsule ~2px lower than tick baseline,
+                // creating a small gap below the label area.
+                Positioned(
+                  top: 0,
+                  bottom: 3,
+                  left: _kIconPad,
+                  right: _kIconPad,
+                  child: const Align(
+                    alignment: Alignment.bottomCenter,
+                    child: _Indicator(),
                   ),
-                ],
-              ), // Stack
-            ), // ClipRect
+                ),
+
+                // ── End icons ────────────────────────────────────────────
+                if (widget.leftIcon != null)
+                  Positioned(
+                    left: 12,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(child: widget.leftIcon!),
+                  ),
+                if (widget.rightIcon != null)
+                  Positioned(
+                    right: 12,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(child: widget.rightIcon!),
+                  ),
+              ],
+            ),
           );
         },
       ),
@@ -336,13 +391,21 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   }
 }
 
-/// Center indicator line — height matches the tick strip (_cacheHeight = 16).
+/// Center indicator — a rounded capsule pill, taller than the major ticks so
+/// it visibly protrudes above them. Thicker width makes it immediately obvious.
 class _Indicator extends StatelessWidget {
   const _Indicator();
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 2, height: 16, color: Colors.orange);
+    return Container(
+      width: 6,
+      height: 24,
+      decoration: BoxDecoration(
+        color: const Color(0xFFED9478),
+        borderRadius: BorderRadius.circular(100),
+      ),
+    );
   }
 }
 
@@ -374,8 +437,10 @@ class _LabelsPainter extends CustomPainter {
     final double centerX = rulerOffset + visualIndex * tickSpacing;
 
     // Labels sit just above the tick strip.
-    // Bottom of text aligns to (tickTop - 6).
-    const double labelBaselineY = -2.0;
+    // labelBaselineY offsets the label bottom from tickTop.
+    // Keep at -2 so the top of tall glyphs (18px bold ~22px rendered) just touches
+    // y=0 without being clipped by the inner ClipRect.
+    const double labelBaselineY = -6.0;
 
     // Minimum pixel gap between the edge of one label and the start of the next.
     const double minGap = 18.0;

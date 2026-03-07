@@ -713,18 +713,61 @@ class _CameraScreenState extends State<CameraScreen> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(100),
           child: ColoredBox(
-            color: const Color(0xFF121212).withValues(alpha: 0.8),
+            color: Colors.black.withValues(alpha: 0.65),
             child: CameraRulerSlider(
               key: ValueKey(p),
               config: config,
               initialValue: currentValue,
               onChanged: onChanged,
-              fadeColor: const Color(0xFF121212),
+              fadeColor: Colors.black,
+              leftIcon: Icon(
+                _sliderLeftIcon(p),
+                // ISO and Zoom: symmetric sizes. Shutter/Focus: smaller left.
+                size: (p == CameraParam.iso || p == CameraParam.zoom) ? 20 : 18,
+                color: Colors.white.withValues(alpha: 0.5),
+              ),
+              rightIcon: Icon(
+                _sliderRightIcon(p),
+                size: (p == CameraParam.iso || p == CameraParam.zoom) ? 20 : 22,
+                color: Colors.white.withValues(alpha: 0.5),
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// Returns the icon for the left (min) end of the slider for [p].
+  IconData _sliderLeftIcon(CameraParam p) {
+    switch (p) {
+      case CameraParam.iso:
+        return Icons.brightness_5; // lower ISO = less sensitive (dimmer)
+      case CameraParam.shutter:
+        return Icons.shutter_speed; // left = fast (less light)
+      case CameraParam.zoom:
+        return Icons.zoom_out;
+      case CameraParam.focus:
+        return Icons.center_focus_weak; // far/soft focus
+      default:
+        return Icons.remove;
+    }
+  }
+
+  /// Returns the icon for the right (max) end of the slider for [p].
+  IconData _sliderRightIcon(CameraParam p) {
+    switch (p) {
+      case CameraParam.iso:
+        return Icons.brightness_7; // higher ISO = more sensitive (brighter)
+      case CameraParam.shutter:
+        return Icons.shutter_speed; // right = slow (more light)
+      case CameraParam.zoom:
+        return Icons.zoom_in;
+      case CameraParam.focus:
+        return Icons.center_focus_strong; // close/sharp focus
+      default:
+        return Icons.add;
+    }
   }
 
   /// Floating WB panel — shown instead of a numeric slider since WB has no

@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-03-08 (update 19)
+
+### CameraRulerSlider: bottom-aligned ticks, thicker indicator, transparent container
+
+- Ticks reverted to bottom-aligned (grow upward from baseline), matching reference images; center-alignment was wrong.
+- Center indicator enlarged from 3×20 to 4×24 px capsule (`Color(0xFFED9478)`) — now clearly taller than major ticks (14px) and visibly protrudes above them.
+- Container changed from `Color(0xFF121212)` at 0.8 alpha → `Colors.black` at 0.65 alpha; `fadeColor` also set to `Colors.black` — matches the more transparent dark-glass look in reference.
+
+## 2026-03-08 (update 18)
+
+### CameraRulerSlider: no icon overlap + reference visual style
+
+- Tick strip and labels now clipped to inner `[_kIconPad=36px, width-36px]` zone via nested `ClipRect` + `Positioned`; icons always render over the non-tick edges so there is zero overlap.
+- Tick color changed from white → warm salmon `Color(0xFFD4847A)` (major 85%, minor 45%), ticks center-aligned vertically to match the reference camera-app style.
+- Center indicator changed from flat 2×16 `Colors.orange` line → 3×20 rounded capsule `Color(0xFFED9478)` with `borderRadius: 100`; fade gradient tightened to stops `[0, 0.12, 0.22, 0.78, 0.88, 1]`.
+
+## 2026-03-08 (update 17)
+
+### CameraRulerSlider: end icons per slider
+
+- Added optional `leftIcon`/`rightIcon` (`Widget?`) params to `CameraRulerSlider`; icons are positioned inside the capsule at each edge, centered vertically in the fade zone.
+- Added `_sliderLeftIcon()`/`_sliderRightIcon()` helpers in `main.dart`; ISO uses brightness_5/brightness_7, shutter uses shutter_speed both sides, zoom uses zoom_out/zoom_in, focus uses center_focus_weak/center_focus_strong.
+- Left icon 14px / right icon 20px, both at 50% white opacity — mirrors the reference camera app style (smaller left = min, larger right = max).
+
 ## 2026-03-08 (update 16)
 
 ### CameraRulerSlider + main.dart: ISO/shutter stops, compact size, 600px width
