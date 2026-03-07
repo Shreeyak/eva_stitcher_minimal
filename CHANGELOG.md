@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-03-07 (update 13)
+
+### CameraRulerSlider: per-tick snap during drag, subpixel rendering, no flicker
+
+- **Snap-on-drag**: replaced float `percent` with `_currentIndex` (int) + `_dragAccum` (pixel accumulator). Index advances one step per `tickSpacing` px of drag; haptic and visual snap simultaneously.
+- **Subpixel rendering**: `canvas.translate(dx, 0)` feeds the fractional offset into the GPU matrix instead of rounding it through `drawImage(Offset)`.
+- **No flicker**: `didUpdateWidget` compares by config content (stopCount / majorTickEvery) and never nulls the cache before the rebuild completes.
+
+## 2026-03-07 (update 12)
+
+### Fixed CameraRulerSlider ticks spread/frozen, added labels
+
+- Restored async cache but with `const _cacheHeight = 100` (fixed) instead of `size.height` (was `infinity` inside Column → silent failure).
+- Replaced scroll-offset translation with center-lock: `dx = width/2 − activeIndex × tickSpacing`, so the active tick always sits under the orange indicator and ticks move correctly on swipe.
+- Added `_drawLabels()` in painter: fades ±4 stops around center, with bold weight on the active stop.
+
+## 2026-03-07 (update 11)
+
+### Fixed invisible ruler ticks in CameraRulerSlider
+
+- Removed async GPU cache (`buildCache`) — it failed silently because `constraints.maxHeight` was `infinity` inside a `Column(mainAxisSize: min)`, causing `picture.toImage(w, infinity.toInt())` to produce nothing.
+- Replaced with direct tick drawing in `_RulerPainter.paint()`. Strip spacing auto-expands when stop count × tickSpacing < widget width to prevent negative scroll offsets (bug with 6 ISO stops).
+
+## 2026-03-07 (update 10)
+
+### Fixed ISO/shutter stops and updated CameraDialConfig usage
+
+- Replaced dynamic ISO stops with fixed list `[100, 200, 400, 800, 1200, 1600]` and shutter stops with 13 fixed fractions (1/10 – 1/500000) converted to nanoseconds.
+- Updated all four `CameraDialConfig` usages in `_buildHoverSlider()` to the new API (`stops`, `majorTickEvery`, `formatter` only); zoom/focus generate log-spaced stops via `List.generate` + `pow`.
+
 ## 2026-03-07 (update 9)
 
 ### GPU-cached ruler rendering restored

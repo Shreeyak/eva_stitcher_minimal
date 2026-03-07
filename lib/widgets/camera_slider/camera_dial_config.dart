@@ -1,79 +1,59 @@
 import 'dart:math';
 
+/// Formatter for label rendering
 typedef DialFormatter = String Function(double value);
 
+/// Configuration for a camera dial (ISO / shutter / zoom / focus)
 class CameraDialConfig {
-  final double min;
-  final double max;
+  /// Discrete stops used by the dial.
+  /// Example ISO: [100,200,400,800,1600]
+  /// Example shutter: [1/10,1/20,1/40,...]
+  final List<double> stops;
 
-  final int ticks;
+  /// Index interval for major ticks
   final int majorTickEvery;
 
-  final bool logarithmic;
-  final bool clamp;
-
-  final List<double>? stops;
-
+  /// Optional label formatter
   final DialFormatter? formatter;
 
   const CameraDialConfig({
-    required this.min,
-    required this.max,
-    this.ticks = 120,
-    this.majorTickEvery = 10,
-    this.logarithmic = false,
-    this.clamp = true,
-    this.stops,
+    required this.stops,
+    this.majorTickEvery = 1,
     this.formatter,
   });
 
-  bool get isDiscrete => stops != null && stops!.isNotEmpty;
+  int get stopCount => stops.length;
 
-  double percentToValue(double p) {
-    if (isDiscrete) {
-      final index = (p * (stops!.length - 1)).round();
-      return stops![index];
-    }
-
-    if (!logarithmic) {
-      return min + p * (max - min);
-    }
-
-    return min * pow(max / min, p);
+  /// Convert stop index → percent
+  double indexToPercent(int index) {
+    return index / (stopCount - 1);
   }
 
-  double valueToPercent(double v) {
-    if (isDiscrete) {
-      int closest = 0;
-      double best = double.infinity;
-
-      for (int i = 0; i < stops!.length; i++) {
-        final d = (stops![i] - v).abs();
-        if (d < best) {
-          best = d;
-          closest = i;
-        }
-      }
-
-      return closest / (stops!.length - 1);
-    }
-
-    if (!logarithmic) {
-      return (v - min) / (max - min);
-    }
-
-    return log(v / min) / log(max / min);
+  /// Convert percent → stop index
+  int percentToIndex(double percent) {
+    return (percent * (stopCount - 1)).round();
   }
 
-  String format(double v) {
+  double percentToValue(double percent) {
+    return stops[percentToIndex(percent)];
+  }
+
+  /// Default label formatting
+  String format(double value) {
     if (formatter != null) {
-      return formatter!(v);
+      return formatter!(value);
     }
 
-    if (v >= 1) {
-      return v.toStringAsFixed(0);
+    if (value >= 1) {
+      return value.toStringAsFixed(0);
     }
 
-    return "1/${(1 / v).round()}";
+    final inv = 1 / value;
+
+    if (inv > 100000) {
+      return "1/${(inv / 1000).round()}k";
+    }
+
+    return "1/${inv.round()}";
   }
 }

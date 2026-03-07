@@ -29,7 +29,6 @@
 library;
 
 import 'dart:async';
-import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -37,6 +36,10 @@ import 'package:flutter/services.dart';
 
 import 'camera_dial_config.dart';
 
+/// Camera ruler slider
+///
+/// Designed for ISO / shutter style camera controls.
+/// Uses cached tick strip for high performance.
 class CameraRulerSlider extends StatefulWidget {
   final CameraDialConfig config;
   final double initialValue;
@@ -54,48 +57,62 @@ class CameraRulerSlider extends StatefulWidget {
 }
 
 class _CameraRulerSliderState extends State<CameraRulerSlider> {
-  double percent = 0;
+  /// Snapped stop index — advances one step per tick during drag.
+  int _currentIndex = 0;
 
+  /// Sub-tick pixel accumulator — controls *when* the index advances, not used for visuals.
+  double _dragAccum = 0;
+
+  /// velocity in pixels/sec for inertia
   double velocity = 0;
+
   DateTime? lastTime;
 
   Timer? inertiaTimer;
 
-  double lastTick = -1;
-
+  /// cached tick strip image
   ui.Image? rulerCache;
-  Size? cacheSize;
 
-  static const double tickSpacing = 18;
+  static const double tickSpacing = 22;
+  static const double _cacheHeight = 100;
+
+  /// Always the snapped integer position — visual and haptic snap happen together, no glide-between-ticks.
+  double get _visualIndex => _currentIndex.toDouble();
 
   @override
   void initState() {
     super.initState();
-    percent = widget.config.valueToPercent(widget.initialValue);
+    final idx = widget.config.stops.indexOf(widget.initialValue);
+    _currentIndex = (idx < 0 ? 0 : idx).clamp(0, widget.config.stopCount - 1);
+    _buildCache();
   }
 
   @override
-  void didUpdateWidget(covariant CameraRulerSlider oldWidget) {
+  void didUpdateWidget(CameraRulerSlider oldWidget) {
     super.didUpdateWidget(oldWidget);
-
-    final geometryChanged =
-        oldWidget.config.ticks != widget.config.ticks ||
-        oldWidget.config.majorTickEvery != widget.config.majorTickEvery;
-
-    if (geometryChanged) {
-      rulerCache = null;
-      cacheSize = null;
+    // Only rebuild the cache when the stops themselves change.
+    // Do NOT null out rulerCache first — keep the old image visible
+    // during the async gap to prevent flicker on every parent setState.
+    final oldCfg = oldWidget.config;
+    final newCfg = widget.config;
+    if (oldCfg.stopCount != newCfg.stopCount ||
+        oldCfg.majorTickEvery != newCfg.majorTickEvery) {
+      _buildCache();
     }
   }
 
-  Future<void> buildCache(Size size) async {
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
+  /// Builds the GPU-cached tick strip with a fixed height.
+  Future<void> _buildCache() async {
+    final n = widget.config.stopCount;
+    if (n < 2) return;
 
-    final cycleWidth = widget.config.ticks * tickSpacing;
-    final horizontalPadding = size.width / 2 + 40;
-    final width = cycleWidth * 3 + horizontalPadding * 2;
-    final height = size.height;
+    // Fixed height avoids double.infinity from Column(mainAxisSize: min), which makes toImage() fail silently.
+    final double width = n * tickSpacing;
+    const double height = _cacheHeight;
+
+    final recorder = ui.PictureRecorder();
+    // Canvas bounding rect is required — omitting it clips lines outside the image origin.
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
 
     final minor = Paint()
       ..strokeWidth = 2
@@ -105,134 +122,105 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
       ..strokeWidth = 3
       ..color = Colors.white;
 
-    for (int i = 0; i <= widget.config.ticks * 3; i++) {
-      final dx = horizontalPadding + i * tickSpacing;
-
+    for (int i = 0; i < n; i++) {
+      final dx = i * tickSpacing;
       final isMajor = i % widget.config.majorTickEvery == 0;
-
-      final h = isMajor ? 34 : 18;
-
+      final tickH = isMajor ? 34.0 : 18.0;
       canvas.drawLine(
         Offset(dx, height / 2),
-        Offset(dx, height / 2 - h),
+        Offset(dx, height / 2 - tickH),
         isMajor ? major : minor,
       );
     }
 
     final picture = recorder.endRecording();
-
-    rulerCache = await picture.toImage(width.toInt(), height.toInt());
-
-    cacheSize = size;
-
-    setState(() {});
+    final image = await picture.toImage(width.ceil(), height.ceil());
+    if (mounted) {
+      setState(() => rulerCache = image);
+    }
   }
 
+  // Accumulate raw pixels; advance index by 1 stop per tickSpacing px so snap and haptic fire together.
   void updateDrag(double delta) {
-    final percentPerPixel = 1 / (widget.config.ticks * tickSpacing);
-
-    percent -= delta * percentPerPixel;
-
-    if (widget.config.clamp) {
-      percent = percent.clamp(0.0, 1.0);
-    } else {
-      percent = percent % 1;
-      if (percent < 0) percent += 1;
+    _dragAccum += delta;
+    final steps = (_dragAccum / tickSpacing).truncate();
+    if (steps != 0) {
+      _dragAccum -= steps * tickSpacing;
+      final newIndex =
+          (_currentIndex - steps).clamp(0, widget.config.stopCount - 1);
+      if (newIndex != _currentIndex) {
+        _currentIndex = newIndex;
+        HapticFeedback.selectionClick();
+        widget.onChanged(widget.config.stops[_currentIndex]);
+      }
     }
-
-    percent = snap(percent);
-
-    triggerHaptic(percent);
-
     setState(() {});
-
-    widget.onChanged(widget.config.percentToValue(percent));
   }
 
-  double snap(double p) {
-    if (widget.config.isDiscrete) {
-      final steps = widget.config.stops!.length - 1;
-      final step = 1 / steps;
-
-      return (p / step).round() * step;
-    }
-
-    final step = 1 / widget.config.ticks;
-
-    return (p / step).round() * step;
-  }
-
-  void triggerHaptic(double p) {
-    final tick = (p * widget.config.ticks).roundToDouble();
-
-    if (tick != lastTick) {
-      lastTick = tick;
-      HapticFeedback.selectionClick();
-    }
-  }
-
+  /// Track drag velocity
   void trackVelocity(double delta) {
     final now = DateTime.now();
-
     if (lastTime != null) {
       final dt = now.difference(lastTime!).inMilliseconds / 1000;
-
-      velocity = delta / dt;
+      if (dt > 0) velocity = delta / dt;
     }
-
     lastTime = now;
   }
 
+  /// Inertial scrolling after drag release, then flush residual accumulator.
   void startInertia() {
-    const friction = 0.92;
-
+    const friction = 0.88;
     inertiaTimer?.cancel();
-
     inertiaTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
       velocity *= friction;
-
       if (velocity.abs() < 0.5) {
         inertiaTimer?.cancel();
+        setState(() => _dragAccum = 0);
         return;
       }
-
       updateDrag(velocity * 0.016);
     });
   }
 
+  /// Flush accumulator on finger lift.
+  void onDragEnd() {
+    if (velocity.abs() < 0.5) {
+      setState(() => _dragAccum = 0);
+    } else {
+      startInertia();
+    }
+  }
+
+  @override
+  void dispose() {
+    inertiaTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = Size(constraints.maxWidth, constraints.maxHeight);
-
-        if (rulerCache == null || cacheSize != size) {
-          buildCache(size);
-        }
-
-        return SizedBox(
-          height: 100,
-          child: GestureDetector(
-            onHorizontalDragUpdate: (d) {
-              trackVelocity(d.delta.dx);
-              updateDrag(d.delta.dx);
-            },
-            onHorizontalDragEnd: (_) => startInertia(),
-            child: CustomPaint(
-              painter: _RulerPainter(
-                percent: percent,
-                config: widget.config,
-                cache: rulerCache,
-              ),
-              child: const Center(child: _Indicator()),
-            ),
+    return SizedBox(
+      height: _CameraRulerSliderState._cacheHeight,
+      child: GestureDetector(
+        onHorizontalDragUpdate: (d) {
+          trackVelocity(d.delta.dx);
+          updateDrag(d.delta.dx);
+        },
+        onHorizontalDragEnd: (_) => onDragEnd(),
+        child: CustomPaint(
+          painter: _RulerPainter(
+            visualIndex: _visualIndex,
+            config: widget.config,
+            cache: rulerCache,
           ),
-        );
-      },
+          child: const Center(child: _Indicator()),
+        ),
+      ),
     );
   }
 }
 
+/// Center indicator line
 class _Indicator extends StatelessWidget {
   const _Indicator();
 
@@ -242,94 +230,117 @@ class _Indicator extends StatelessWidget {
   }
 }
 
+/// Painter responsible for drawing ruler ticks and labels.
+/// Uses a pre-built cached image for the tick strip, translated so the active
+/// tick always sits under the center indicator.
 class _RulerPainter extends CustomPainter {
-  final double percent;
+  final double visualIndex;
   final CameraDialConfig config;
   final ui.Image? cache;
 
-  static const double tickSpacing = 18;
+  static const double tickSpacing = 22;
 
   _RulerPainter({
-    required this.percent,
+    required this.visualIndex,
     required this.config,
     required this.cache,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final centerX = size.width / 2;
-    final cycleWidth = config.ticks * tickSpacing;
-    final horizontalPadding = size.width / 2 + 40;
-    final offset = percent * cycleWidth;
+    if (cache == null) return;
 
-    if (cache != null) {
-      final sourceLeft = horizontalPadding + cycleWidth + offset - centerX;
-      canvas.drawImageRect(
-        cache!,
-        Rect.fromLTWH(sourceLeft, 0, size.width, size.height),
-        Rect.fromLTWH(0, 0, size.width, size.height),
-        Paint(),
-      );
-    }
+    // canvas.translate (not Offset in drawImage) keeps dx in the GPU matrix for true subpixel rendering.
+    final dx = size.width / 2 - visualIndex * tickSpacing;
+    canvas.save();
+    canvas.translate(dx, 0);
+    canvas.drawImage(cache!, Offset.zero, Paint());
+    canvas.restore();
 
-    final tickIndex = percent * config.ticks;
-    for (int i = -config.ticks; i <= config.ticks * 2; i++) {
-      final logicalTick = i % config.ticks;
-      final tick = logicalTick < 0 ? logicalTick + config.ticks : logicalTick;
-      if (tick % config.majorTickEvery != 0) continue;
+    _drawLabels(canvas, size, visualIndex, dx);
+    _drawCenterGlow(canvas, size);
+    _drawEdgeFade(canvas, size);
+  }
 
-      final dx = centerX + (i - tickIndex) * tickSpacing;
-      if (dx < -60 || dx > size.width + 60) continue;
+  void _drawLabels(
+    Canvas canvas,
+    Size size,
+    double centerIndex,
+    double rulerOffset,
+  ) {
+    const labelWindow = 4; // labels within ±4 stops of center
+    final center = centerIndex.round();
 
-      final distance = ((dx - centerX).abs() / size.width);
-      final fade = max(0.0, 1.0 - distance * 1.6);
-      if (fade <= 0.25) continue;
+    for (int i = center - labelWindow; i <= center + labelWindow; i++) {
+      if (i < 0 || i >= config.stopCount) continue;
 
-      final value = config.percentToValue(tick / config.ticks);
-      final textPainter = TextPainter(
+      final x = rulerOffset + i * tickSpacing;
+      if (x < -40 || x > size.width + 40) continue;
+
+      final distance = (i - centerIndex).abs();
+      final opacity = (1 - distance / labelWindow).clamp(0.0, 1.0);
+
+      final text = config.format(config.stops[i]);
+      final painter = TextPainter(
         text: TextSpan(
-          text: config.format(value),
+          text: text,
           style: TextStyle(
-            color: Colors.white.withOpacity(fade),
-            fontSize: 12,
+            color: Colors.white.withOpacity(opacity),
+            fontSize: 11,
+            fontWeight:
+                i == center ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
 
-      textPainter.paint(
+      painter.paint(
         canvas,
-        Offset(dx - textPainter.width / 2, size.height / 2 - 56),
+        Offset(x - painter.width / 2, size.height / 2 - 52),
       );
     }
+  }
 
+  void _drawCenterGlow(Canvas canvas, Size size) {
     final glow = Paint()
-      ..shader =
-          LinearGradient(
-            colors: [
-              Colors.transparent,
-              Colors.white.withOpacity(0.15),
-              Colors.transparent,
-            ],
-          ).createShader(
-            Rect.fromCenter(
-              center: Offset(size.width / 2, size.height / 2),
-              width: 120,
-              height: size.height,
-            ),
-          );
-
+      ..shader = LinearGradient(
+        colors: [
+          Colors.transparent,
+          Colors.white.withOpacity(0.15),
+          Colors.transparent,
+        ],
+      ).createShader(
+        Rect.fromCenter(
+          center: Offset(size.width / 2, size.height / 2),
+          width: 120,
+          height: size.height,
+        ),
+      );
     canvas.drawRect(
       Rect.fromLTWH(size.width / 2 - 60, 0, 120, size.height),
       glow,
     );
   }
 
+  void _drawEdgeFade(Canvas canvas, Size size) {
+    final fade = Paint()
+      ..shader = LinearGradient(
+        colors: [Colors.black, Colors.transparent],
+      ).createShader(Rect.fromLTWH(0, 0, 80, size.height));
+
+    canvas.drawRect(Rect.fromLTWH(0, 0, 80, size.height), fade);
+
+    canvas.save();
+    canvas.translate(size.width - 80, 0);
+    canvas.scale(-1, 1);
+    canvas.drawRect(Rect.fromLTWH(0, 0, 80, size.height), fade);
+    canvas.restore();
+  }
+
   @override
   bool shouldRepaint(covariant _RulerPainter oldDelegate) {
-    return oldDelegate.percent != percent ||
-        oldDelegate.config.ticks != config.ticks ||
-        oldDelegate.config.majorTickEvery != config.majorTickEvery ||
-        oldDelegate.cache != cache;
+    return oldDelegate.visualIndex != visualIndex ||
+        oldDelegate.cache != cache ||
+        oldDelegate.config != config;
   }
 }
