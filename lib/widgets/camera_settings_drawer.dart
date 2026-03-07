@@ -164,11 +164,20 @@ class CameraSettingsDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.0, end: isOpen ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeInOut,
-      height: isOpen ? _kStripHeight : 0.0,
-      child: ClipRect(child: _buildStrip()),
+      child: SizedBox(height: _kStripHeight, child: _buildStrip()),
+      builder: (context, factor, child) {
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            heightFactor: factor,
+            child: child,
+          ),
+        );
+      },
     );
   }
 

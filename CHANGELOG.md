@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-03-07 (update 9)
+
+### GPU-cached ruler rendering restored
+
+- Restored the `CameraRulerSlider` tick strip to render from a prebuilt cached image again, while keeping major tick labels dynamic on top for readability.
+- Cache rebuilds now only trigger when ruler geometry changes, preserving the intended smooth scrolling path from the original slider design.
+
+## 2026-03-07 (update 8)
+
+### Ruler tick visibility restored
+
+- Fixed `CameraRulerSlider` so tick marks and labels are painted directly again, preventing blank sliders where only the orange center marker remained visible.
+- Reduced label density on discrete ISO and shutter sliders by promoting every third stop to a major tick.
+
+## 2026-03-07 (update 7)
+
+### Settings drawer animation overflow fix
+
+- Reworked the bottom camera settings strip open/close animation to use a clipped height-factor animation instead of shrinking child layout constraints.
+- This prevents `_ParamChip` content from overflowing vertically during drawer open/close transitions and hot restarts.
+
+## 2026-03-07 (update 6)
+
+### Discrete ISO and shutter slider stops
+
+- Updated `main.dart` to initialize the new `CameraDialConfig` API with `stops`/`formatter` instead of the old continuous-label config.
+- ISO and shutter sliders now snap to practical photography-style discrete stops, filtered to each device's supported min/max range and padded with exact range endpoints when needed.
+
 ## 2026-03-07 (update 5)
 
 ### Manual-only exposure controls

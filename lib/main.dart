@@ -308,6 +308,159 @@ class _CameraScreenState extends State<CameraScreen> {
     CameraControl.setZoomRatio(ratio);
   }
 
+  List<double> _buildIsoStops() {
+    final minIso = _isoRange.isNotEmpty ? _isoRange[0].toDouble() : 100.0;
+    final maxIso = _isoRange.length >= 2 && _isoRange[1] > _isoRange[0]
+        ? _isoRange[1].toDouble()
+        : 6400.0;
+
+    const standardIsoStops = <double>[
+      25,
+      32,
+      40,
+      50,
+      64,
+      80,
+      100,
+      125,
+      160,
+      200,
+      250,
+      320,
+      400,
+      500,
+      640,
+      800,
+      1000,
+      1250,
+      1600,
+      2000,
+      2500,
+      3200,
+      4000,
+      5000,
+      6400,
+      8000,
+      10000,
+      12800,
+    ];
+
+    final stops = standardIsoStops
+        .where((value) => value >= minIso && value <= maxIso)
+        .toList();
+
+    return _withDiscreteBounds(
+      stops: stops,
+      min: minIso,
+      max: maxIso,
+      absoluteTolerance: 1.0,
+    );
+  }
+
+  List<double> _buildShutterStopsNs() {
+    final minNs = _exposureTimeRangeNs.isNotEmpty
+        ? _exposureTimeRangeNs[0].toDouble()
+        : 125000.0;
+    final maxNs = _exposureTimeRangeNs.length >= 2
+        ? _exposureTimeRangeNs[1].toDouble().clamp(minNs, 1e9)
+        : 1e9;
+
+    const standardShutterSeconds = <double>[
+      1 / 8000,
+      1 / 6400,
+      1 / 5000,
+      1 / 4000,
+      1 / 3200,
+      1 / 2500,
+      1 / 2000,
+      1 / 1600,
+      1 / 1250,
+      1 / 1000,
+      1 / 800,
+      1 / 640,
+      1 / 500,
+      1 / 400,
+      1 / 320,
+      1 / 250,
+      1 / 200,
+      1 / 160,
+      1 / 125,
+      1 / 100,
+      1 / 80,
+      1 / 60,
+      1 / 50,
+      1 / 40,
+      1 / 30,
+      1 / 25,
+      1 / 20,
+      1 / 15,
+      1 / 13,
+      1 / 10,
+      1 / 8,
+      1 / 6,
+      1 / 5,
+      1 / 4,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.8,
+      1.0,
+    ];
+
+    final stops = standardShutterSeconds
+        .map((seconds) => seconds * 1e9)
+        .where((value) => value >= minNs && value <= maxNs)
+        .toList();
+
+    return _withDiscreteBounds(
+      stops: stops,
+      min: minNs,
+      max: maxNs,
+      absoluteTolerance: 5000.0,
+    );
+  }
+
+  List<double> _withDiscreteBounds({
+    required List<double> stops,
+    required double min,
+    required double max,
+    required double absoluteTolerance,
+  }) {
+    final values = <double>[...stops];
+
+    bool containsClose(double target) {
+      for (final value in values) {
+        if ((value - target).abs() <= absoluteTolerance) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    if (!containsClose(min)) {
+      values.add(min);
+    }
+    if (!containsClose(max)) {
+      values.add(max);
+    }
+
+    values.sort();
+
+    final deduped = <double>[];
+    for (final value in values) {
+      if (deduped.isEmpty || (deduped.last - value).abs() > absoluteTolerance) {
+        deduped.add(value);
+      }
+    }
+
+    if (deduped.length >= 2) {
+      return deduped;
+    }
+
+    return [min, max == min ? min + absoluteTolerance : max];
+  }
+
   // ── Scan / session ────────────────────────────────────────────────
 
   void _toggleScan() {
@@ -479,40 +632,30 @@ class _CameraScreenState extends State<CameraScreen> {
 
     switch (p) {
       case CameraParam.iso:
-        // Log scale: ISO 100 → device max. Photographers perceive ISO in
-        // stops (×2), so equal ruler distance = equal perceived exposure change.
-        final isoMax = _isoRange.length >= 2 && _isoRange[1] > _isoRange[0]
-            ? _isoRange[1].toDouble()
-            : 6400.0;
+        final isoStops = _buildIsoStops();
         config = CameraDialConfig(
-          min: _isoRange.isNotEmpty ? _isoRange[0].toDouble() : 100.0,
-          max: isoMax,
-          ticks: 60,
-          majorTickEvery: 6,
-          logarithmic: true,
+          min: isoStops.first,
+          max: isoStops.last,
+          ticks: isoStops.length - 1,
+          majorTickEvery: 3,
           clamp: true,
-          formatValue: (v) => v.round().toString(),
+          stops: isoStops,
+          formatter: (v) => v.round().toString(),
         );
         currentValue = _isoValue.toDouble();
         onChanged = (v) => _onIsoChanged(v.round());
         break;
 
       case CameraParam.shutter:
-        // Log scale in nanoseconds: device min → 1 s max.
-        final shutterMin = _exposureTimeRangeNs.isNotEmpty
-            ? _exposureTimeRangeNs[0].toDouble()
-            : 125000.0; // ≈ 1/8000 s
-        final shutterMax = _exposureTimeRangeNs.length >= 2
-            ? _exposureTimeRangeNs[1].toDouble().clamp(shutterMin, 1e9)
-            : 1e9; // 1 s
+        final shutterStops = _buildShutterStopsNs();
         config = CameraDialConfig(
-          min: shutterMin,
-          max: shutterMax,
-          ticks: 100,
-          majorTickEvery: 10,
-          logarithmic: true,
+          min: shutterStops.first,
+          max: shutterStops.last,
+          ticks: shutterStops.length - 1,
+          majorTickEvery: 3,
           clamp: true,
-          formatValue: (v) {
+          stops: shutterStops,
+          formatter: (v) {
             final secs = v / 1e9;
             if (secs < 1.0) {
               final denom = (1.0 / secs).round();
@@ -537,7 +680,7 @@ class _CameraScreenState extends State<CameraScreen> {
           majorTickEvery: 6,
           logarithmic: true,
           clamp: true,
-          formatValue: (v) => '${v.toStringAsFixed(1)}×',
+          formatter: (v) => '${v.toStringAsFixed(1)}×',
         );
         currentValue = _currentZoomRatio;
         onChanged = (v) => _onZoomChanged(v);
@@ -553,7 +696,7 @@ class _CameraScreenState extends State<CameraScreen> {
           majorTickEvery: 8,
           logarithmic: true,
           clamp: true,
-          formatValue: (v) {
+          formatter: (v) {
             final metres = 1.0 / v;
             if (metres >= 100) return '∞';
             if (metres >= 1.0) return '${metres.toStringAsFixed(1)}m';
