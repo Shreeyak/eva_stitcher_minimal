@@ -713,7 +713,7 @@ class _CameraScreenState extends State<CameraScreen> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(100),
           child: ColoredBox(
-            color: Colors.black.withValues(alpha: 0.65),
+            color: const Color(0xFF1A1A1A).withValues(alpha: 0.82),
             child: CameraRulerSlider(
               key: ValueKey(p),
               config: config,

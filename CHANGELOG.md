@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-03-08 (update 21)
+
+### CameraRulerSlider: Per-tick alpha fade in painter (replaces ShaderMask)
+
+- Rewrote `_TicksPainter` to accept `rulerOffset` and draw only viewport-visible ticks. Each tick alpha is computed from its distance from the inner-zone viewport edges (`_fadeZone = 30px`), fixing the invisible-tick-at-min/max bug permanently.
+- Removed `ShaderMask`, `RawImage`, GPU cache, and scrolling `Positioned` — inner zone is now a single `ClipRect > Stack([Positioned.fill tick painter, Positioned.fill label painter])`.
+
+- Wrapped inner zone `ClipRect` in `ShaderMask(blendMode: BlendMode.dstIn)` with gradient transparent→white (8%)→white (92%)→transparent for soft tick edge fade.
+- Added `ColoredBox(Color(0xFF1A1A1A))` as first Stack child to give `ShaderMask` stable, scroll-independent bounds — fixes invisible ticks at min/max positions.
+- Fade is seamless: background matches container color so the reveal has no color discontinuity.
+
 ## 2026-03-08 (update 19)
 
 ### CameraRulerSlider: bottom-aligned ticks, thicker indicator, transparent container
