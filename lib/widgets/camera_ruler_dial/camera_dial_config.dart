@@ -1,5 +1,3 @@
-import 'dart:math';
-
 /// Formatter for label rendering
 typedef DialFormatter = String Function(double value);
 

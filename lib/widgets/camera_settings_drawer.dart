@@ -20,12 +20,53 @@
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
-import 'camera_dial/dial_config.dart'; // CameraParam enum
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
 /// Height of the icon-strip row.
 const double _kStripHeight = 52.0;
+
+// ─── CameraParam enum ────────────────────────────────────────────────────────
+
+/// The set of adjustable camera parameters shown in the settings drawer.
+/// Each variant corresponds to one icon tab and one [DialConfig] preset.
+enum CameraParam {
+  iso,
+  shutter,
+  focus,
+  wb,
+  zoom;
+
+  /// Short label shown above the dial and in the icon tab.
+  String get label {
+    switch (this) {
+      case CameraParam.iso:
+        return 'ISO';
+      case CameraParam.shutter:
+        return 'SHUTTER';
+      case CameraParam.focus:
+        return 'FOCUS';
+      case CameraParam.wb:
+        return 'WB';
+      case CameraParam.zoom:
+        return 'ZOOM';
+    }
+  }
+
+  /// True when this parameter has an "Auto / Manual" toggle.
+  bool get hasAutoMode {
+    switch (this) {
+      case CameraParam.focus:
+        return true; // AF on/off
+      case CameraParam.wb:
+        return true; // AWB lock
+      case CameraParam.iso:
+      case CameraParam.shutter:
+      case CameraParam.zoom:
+        return false;
+    }
+  }
+}
 
 // ── Icon map ──────────────────────────────────────────────────────────────────
 

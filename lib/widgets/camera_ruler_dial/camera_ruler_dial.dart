@@ -274,7 +274,7 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                         gradient: LinearGradient(
                           colors: [
                             Colors.transparent,
-                            Colors.white.withOpacity(0.15),
+                            Colors.white.withValues(alpha: 0.15),
                             Colors.transparent,
                           ],
                           stops: const [0.44, 0.5, 0.56],
@@ -337,7 +337,7 @@ class _LabelsPainter extends CustomPainter {
         text: TextSpan(
           text: config.format(config.stops[i]),
           style: TextStyle(
-            color: Colors.white.withOpacity(opacity),
+            color: Colors.white.withValues(alpha: opacity),
             fontSize: 11,
             fontWeight: i == center ? FontWeight.w600 : FontWeight.normal,
           ),

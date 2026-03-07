@@ -8,10 +8,9 @@ import 'package:flutter/services.dart';
 import 'app_theme.dart';
 import 'camera_control.dart';
 import 'widgets/bottom_info_bar.dart';
-import 'widgets/camera_dial/dial_config.dart'; // CameraParam enum
 import 'widgets/camera_settings_drawer.dart';
-import 'widgets/camera_slider/camera_dial_config.dart';
-import 'widgets/camera_slider/camera_ruler_slider.dart';
+import 'widgets/camera_ruler_dial/camera_dial_config.dart';
+import 'widgets/camera_ruler_dial/camera_ruler_dial.dart';
 import 'widgets/canvas_view.dart';
 import 'widgets/left_toolbar.dart';
 import 'widgets/mini_map.dart';
