@@ -77,8 +77,17 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   /// cached tick strip image
   ui.Image? rulerCache;
 
-  static const double tickSpacing = 22;
-  static const double _cacheHeight = 100;
+  static const double tickSpacing = 18;
+
+  /// Height of the tick strip image cache.
+  static const double _cacheHeight = 16;
+
+  /// Total widget height (gesture-sensitive area).
+  static const double _totalHeight = 44;
+
+  /// Y-offset from widget top where the tick strip begins.
+  /// The label area lives above this.
+  static const double _tickTop = 24;
 
   /// Fractional index — smooth during drag, integer-aligned at rest.
   double get _visualIndex => _visualPercent * (widget.config.stopCount - 1);
@@ -124,20 +133,21 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
     final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
 
     final minor = Paint()
-      ..strokeWidth = 2
-      ..color = Colors.white54;
+      ..strokeWidth = 1.5
+      ..color = Colors.white.withValues(alpha: 0.35);
 
     final major = Paint()
-      ..strokeWidth = 3
-      ..color = Colors.white;
+      ..strokeWidth = 2
+      ..color = Colors.white.withValues(alpha: 0.85);
 
     for (int i = 0; i < n; i++) {
       final dx = i * tickSpacing;
       final isMajor = i % widget.config.majorTickEvery == 0;
-      final tickH = isMajor ? 34.0 : 18.0;
+      // Bottom-aligned: ticks grow upward from the bottom edge.
+      final tickH = isMajor ? 14.0 : 7.0;
       canvas.drawLine(
-        Offset(dx, height / 2),
-        Offset(dx, height / 2 - tickH),
+        Offset(dx, height),
+        Offset(dx, height - tickH),
         isMajor ? major : minor,
       );
     }
@@ -233,10 +243,11 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
 
   @override
   Widget build(BuildContext context) {
-    // Fixed _cacheHeight — no height guards needed.
-    // LayoutBuilder is used only to read maxWidth for center-lock offset.
+    // _totalHeight is the full gesture-sensitive area.
+    // Tick strip (_cacheHeight) is positioned at _tickTop from the top,
+    // leaving the label area above and a small pad below.
     return SizedBox(
-      height: _cacheHeight,
+      height: _totalHeight,
       child: LayoutBuilder(
         builder: (context, constraints) {
           // dx computed here so Transform.translate gets it; compositor moves
@@ -254,11 +265,10 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Strip — Positioned so RawImage uses its intrinsic (full) width.
-                  // ClipRect above keeps it from overflowing the widget bounds.
+                  // Tick strip — positioned at _tickTop so label area sits above it.
                   Positioned(
                     left: dx,
-                    top: 0,
+                    top: _tickTop,
                     height: _cacheHeight,
                     child: RawImage(
                       image: rulerCache,
@@ -267,7 +277,7 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                     ),
                   ),
 
-                  // Labels painted on top; cheap (text only, no image ops).
+                  // Labels painted on top; only major ticks rendered, large center value.
                   Positioned.fill(
                     child: IgnorePointer(
                       child: CustomPaint(
@@ -275,12 +285,13 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                           visualIndex: _visualIndex,
                           config: widget.config,
                           rulerOffset: dx,
+                          tickTop: _tickTop,
                         ),
                       ),
                     ),
                   ),
 
-                  // Edge fade — widget gradient, GPU composited.
+                  // Edge fade — horizontal gradient over the full widget.
                   Positioned.fill(
                     child: IgnorePointer(
                       child: Container(
@@ -292,32 +303,21 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                               Colors.transparent,
                               Colors.black,
                             ],
-                            stops: [0, 0.12, 0.88, 1],
+                            stops: [0, 0.10, 0.90, 1],
                           ),
                         ),
                       ),
                     ),
                   ),
 
-                  // Center glow — widget gradient, GPU composited.
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.transparent,
-                              Colors.white.withValues(alpha: 0.15),
-                              Colors.transparent,
-                            ],
-                            stops: const [0.44, 0.5, 0.56],
-                          ),
-                        ),
-                      ),
-                    ),
+                  // Center indicator — aligned to the tick strip, not the full widget.
+                  Positioned(
+                    top: _tickTop,
+                    bottom: _totalHeight - _tickTop - _cacheHeight,
+                    left: 0,
+                    right: 0,
+                    child: const Center(child: _Indicator()),
                   ),
-
-                  const Center(child: _Indicator()),
                 ],
               ), // Stack
             ), // ClipRect
@@ -328,61 +328,123 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   }
 }
 
-/// Center indicator line
+/// Center indicator line — height matches the tick strip (_cacheHeight = 16).
 class _Indicator extends StatelessWidget {
   const _Indicator();
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 2, height: 60, color: Colors.orange);
+    return Container(width: 2, height: 16, color: Colors.orange);
   }
 }
 
 /// Labels-only painter — lightweight, no image ops.
-/// Glow and edge fade are handled as widget-layer gradients in build().
+/// Shows: large bold value at center indicator, small faint labels only for
+/// nearby major ticks. Minor ticks are not labelled.
 class _LabelsPainter extends CustomPainter {
   final double visualIndex;
   final CameraDialConfig config;
   final double rulerOffset;
 
-  static const double tickSpacing = 22;
+  /// Y-offset from widget top where the tick strip begins.
+  /// Labels are drawn just above this line.
+  final double tickTop;
+
+  static const double tickSpacing = 18;
 
   _LabelsPainter({
     required this.visualIndex,
     required this.config,
     required this.rulerOffset,
+    required this.tickTop,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    const labelWindow = 4;
-    final center = visualIndex.round();
+    final int step = config.majorTickEvery;
+    final int centerIdx = visualIndex.round().clamp(0, config.stopCount - 1);
+    final double centerX = rulerOffset + visualIndex * tickSpacing;
 
-    for (int i = center - labelWindow; i <= center + labelWindow; i++) {
-      if (i < 0 || i >= config.stopCount) continue;
+    // Labels sit just above the tick strip.
+    // Bottom of text aligns to (tickTop - 4).
+    const double labelBaselineY = -4.0;
 
-      final x = rulerOffset + i * tickSpacing;
-      if (x < -40 || x > size.width + 40) continue;
+    // Minimum pixel gap between the edge of one label and the start of the next.
+    const double minGap = 18.0;
 
-      final distance = (i - visualIndex).abs();
-      final opacity = (1 - distance / labelWindow).clamp(0.0, 1.0);
+    // Maximum side labels shown per direction.
+    const int maxPerSide = 2;
 
-      final painter = TextPainter(
+    // ── Helper: measure and paint a label ────────────────────────────────
+    TextPainter _makePainter(int idx, {required bool isCenter}) {
+      return TextPainter(
         text: TextSpan(
-          text: config.format(config.stops[i]),
+          text: config.format(config.stops[idx]),
           style: TextStyle(
-            color: Colors.white.withValues(alpha: opacity),
-            fontSize: 11,
-            fontWeight: i == center ? FontWeight.w600 : FontWeight.normal,
+            color: isCenter
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.45),
+            fontSize: isCenter ? 18.0 : 10.0,
+            fontWeight: isCenter ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
+    }
 
-      painter.paint(
-        canvas,
-        Offset(x - painter.width / 2, size.height / 2 - 52),
-      );
+    void _paintAt(TextPainter tp, double x) {
+      final double y = tickTop + labelBaselineY - tp.height;
+      tp.paint(canvas, Offset(x - tp.width / 2, y));
+    }
+
+    // ── 1. Center label (always rendered) ────────────────────────────────
+    final centerPainter = _makePainter(centerIdx, isCenter: true);
+    _paintAt(centerPainter, centerX);
+
+    // Right edge of center label in canvas coords (used as clearance boundary).
+    double rightBoundary = centerX + centerPainter.width / 2;
+    // Left edge of center label.
+    double leftBoundary = centerX - centerPainter.width / 2;
+
+    // ── 2. Walk right: nearest major tick(s) to the right of center ──────
+    {
+      // Start from the first major tick strictly to the right of centerIdx.
+      final int firstRight = ((visualIndex / step).ceil() * step);
+      int drawn = 0;
+      for (
+        int i = firstRight;
+        i < config.stopCount && drawn < maxPerSide;
+        i += step
+      ) {
+        final double x = rulerOffset + i * tickSpacing;
+        if (x > size.width + 60) break; // off-screen right
+        final tp = _makePainter(i, isCenter: false);
+        final double leftEdge = x - tp.width / 2;
+        if (leftEdge - rightBoundary >= minGap) {
+          _paintAt(tp, x);
+          rightBoundary = x + tp.width / 2;
+          drawn++;
+        }
+      }
+    }
+
+    // ── 3. Walk left: nearest major tick(s) to the left of center ────────
+    {
+      final int firstLeft = ((visualIndex / step).floor() * step);
+      int drawn = 0;
+      for (int i = firstLeft; i >= 0 && drawn < maxPerSide; i -= step) {
+        final double x = rulerOffset + i * tickSpacing;
+        if (x < -60) break; // off-screen left
+        // Skip the exact center tick — already drawn.
+        if (i == centerIdx) continue;
+        final tp = _makePainter(i, isCenter: false);
+        final double rightEdge = x + tp.width / 2;
+        if (leftBoundary - rightEdge >= minGap) {
+          _paintAt(tp, x);
+          leftBoundary = x - tp.width / 2;
+          drawn++;
+        }
+      }
     }
   }
 

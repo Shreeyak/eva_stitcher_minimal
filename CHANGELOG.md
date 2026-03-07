@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-03-08 (update 16)
+
+### CameraRulerSlider + main.dart: ISO/shutter stops, compact size, 600px width
+
+- ISO: expanded to 1/3-stop values 50–6400 (22 stops), majorTickEvery=3 (full stops: 50,100,200,400,800,1600,3200,6400).
+- Shutter: replaced uneven stops with standard 1/3-stop sequence 1/8000–1/15 (28 stops), majorTickEvery=3; previously all-major clustering fixed.
+- Slider height halved (totalHeight 80→44, cacheHeight 28→16, tickTop 44→24, tick heights 22/11→14/7, indicator 28→16, fonts 24/12→18/10); container width capped at 600px centered, padding minimised (4px v), Positioned height 140→80.
+
+## 2026-03-08 (update 15)
+
+### CameraRulerSlider: compact visual redesign
+
+- Bottom-aligned ticks (major 22px/2px, minor 11px/1.5px), reduced tick spacing 22→18px, refined opacity (85% major / 35% minor); center glow removed.
+- Label hierarchy: large bold center value (24px) + small faint major-tick-only labels (12px) with opacity falloff; minor ticks unlabelled.
+- Total widget height reduced 100→80px (full-width gesture zone preserved); tick strip at `_tickTop=44`, indicator height matches tick strip (28px).
+
 ## 2026-03-07 (update 14)
 
 ### CameraRulerSlider: scrolling-texture layer architecture

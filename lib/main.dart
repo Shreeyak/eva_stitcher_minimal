@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
@@ -309,27 +308,77 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   List<double> _buildIsoStops() {
-    return const <double>[100, 200, 400, 800, 1200, 1600];
+    // Standard 1/3-stop ISO values; filtered to device's reported range.
+    const all = <double>[
+      50,
+      64,
+      80,
+      100,
+      125,
+      160,
+      200,
+      250,
+      320,
+      400,
+      500,
+      640,
+      800,
+      1000,
+      1250,
+      1600,
+      2000,
+      2500,
+      3200,
+      4000,
+      5000,
+      6400,
+    ];
+    final minIso = _isoRange[0].toDouble();
+    final maxIso = _isoRange[1].toDouble();
+    final filtered = all.where((v) => v >= minIso && v <= maxIso).toList();
+    // Always include at least the clamped min and max.
+    if (filtered.isEmpty) return [minIso, maxIso];
+    return filtered;
   }
 
   List<double> _buildShutterStopsNs() {
-    // Shutter stops in seconds, converted to nanoseconds
+    // Standard 1/3-stop shutter speeds; filtered to device's reported range.
     const shutterSeconds = <double>[
-      1 / 10,
-      1 / 20,
-      1 / 40,
-      1 / 80,
-      1 / 160,
-      1 / 320,
-      1 / 640,
-      1 / 1250,
-      1 / 2500,
+      1 / 8000,
+      1 / 6400,
       1 / 5000,
-      1 / 20000,
-      1 / 100000,
-      1 / 500000,
+      1 / 4000,
+      1 / 3200,
+      1 / 2500,
+      1 / 2000,
+      1 / 1600,
+      1 / 1250,
+      1 / 1000,
+      1 / 800,
+      1 / 640,
+      1 / 500,
+      1 / 400,
+      1 / 320,
+      1 / 250,
+      1 / 200,
+      1 / 160,
+      1 / 125,
+      1 / 100,
+      1 / 80,
+      1 / 60,
+      1 / 50,
+      1 / 40,
+      1 / 30,
+      1 / 25,
+      1 / 20,
+      1 / 15,
     ];
-    return shutterSeconds.map((s) => s * 1e9).toList();
+    final allNs = shutterSeconds.map((s) => s * 1e9).toList();
+    final minNs = _exposureTimeRangeNs[0].toDouble();
+    final maxNs = _exposureTimeRangeNs[1].toDouble();
+    final filtered = allNs.where((v) => v >= minNs && v <= maxNs).toList();
+    if (filtered.isEmpty) return [minNs, maxNs];
+    return filtered;
   }
 
   // ── Scan / session ────────────────────────────────────────────────
@@ -471,7 +520,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       bottom: 100,
                       // Cap height so the panel can never grow tall enough to
                       // overlap with widgets pinned to the top of the screen.
-                      height: 140,
+                      height: 80,
                       child: _buildHoverSlider(),
                     ),
 
@@ -512,7 +561,7 @@ class _CameraScreenState extends State<CameraScreen> {
         final isoStops = _buildIsoStops();
         config = CameraDialConfig(
           stops: isoStops,
-          majorTickEvery: 1,
+          majorTickEvery: 3,
           formatter: (v) => v.round().toString(),
         );
         currentValue = isoStops.reduce(
@@ -525,7 +574,7 @@ class _CameraScreenState extends State<CameraScreen> {
         final shutterStops = _buildShutterStopsNs();
         config = CameraDialConfig(
           stops: shutterStops,
-          majorTickEvery: 1,
+          majorTickEvery: 3,
           formatter: (v) {
             final secs = v / 1e9;
             if (secs < 1.0) {
@@ -543,18 +592,36 @@ class _CameraScreenState extends State<CameraScreen> {
         break;
 
       case CameraParam.zoom:
-        // Log-spaced stops from min to max zoom (60 steps).
-        final zoomMax = _maxZoomRatio > _minZoomRatio + 0.1
+        // Integer-anchored stops: 1×, 2×, 3×... with 2 linear intermediates
+        // between each integer. majorTickEvery=3 → major ticks land exactly on
+        // integer zoom values. For max zoom 10: 28 stops = 504 px strip.
+        final double zoomMin = _minZoomRatio;
+        final double zoomMax = _maxZoomRatio > zoomMin + 0.05
             ? _maxZoomRatio
-            : _minZoomRatio + 1.0;
-        final zoomStops = List<double>.generate(60, (i) {
-          final t = i / 59;
-          return _minZoomRatio * pow(zoomMax / _minZoomRatio, t);
-        });
+            : zoomMin + 1.0;
+        final int firstInt = zoomMin.ceil();
+        final int lastInt = zoomMax.floor();
+        final List<double> zoomStops = [];
+        // If device min isn't exactly an integer (e.g. 0.6×), prepend it.
+        if (zoomMin < firstInt - 0.02) zoomStops.add(zoomMin);
+        for (int z = firstInt; z <= lastInt; z++) {
+          zoomStops.add(z.toDouble());
+          if (z < lastInt) {
+            zoomStops.add(z + 1 / 3.0);
+            zoomStops.add(z + 2 / 3.0);
+          }
+        }
+        // If device max isn't exactly an integer (e.g. 9.8×), append it.
+        if (zoomMax > lastInt + 0.02) zoomStops.add(zoomMax);
+        if (zoomStops.length < 2) zoomStops.add(zoomMax);
         config = CameraDialConfig(
           stops: zoomStops,
-          majorTickEvery: 6,
-          formatter: (v) => '${v.toStringAsFixed(1)}×',
+          majorTickEvery: 3,
+          formatter: (v) {
+            // Clean integer label at integer stops; one decimal otherwise.
+            if ((v - v.roundToDouble()).abs() < 0.05) return '${v.round()}×';
+            return '${v.toStringAsFixed(1)}×';
+          },
         );
         currentValue = zoomStops.reduce(
           (a, b) =>
@@ -566,16 +633,37 @@ class _CameraScreenState extends State<CameraScreen> {
         break;
 
       case CameraParam.focus:
-        // Log-spaced stops from 0.1 D to focusMax D (80 steps).
-        final focusMax = _minFocusDistance > 0.1 ? _minFocusDistance : 10.0;
-        final focusStops = List<double>.generate(80, (i) {
-          final t = i / 79;
-          return 0.1 * pow(focusMax / 0.1, t);
-        });
+        // Anchor at perceptually-spaced diopter values; 2 linear intermediates
+        // between each anchor. majorTickEvery=3 → major ticks on anchors.
+        // Diopters: 0 = ∞, higher = closer. focusMax = device min focus dist.
+        final double focusMax = _minFocusDistance > 0.05
+            ? _minFocusDistance
+            : 10.0;
+        // Named diopter anchors — filter to [0, focusMax].
+        const anchorD = <double>[0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0];
+        final validAnchors = anchorD
+            .where((d) => d <= focusMax + 0.05)
+            .toList();
+        // Always include focusMax as the last anchor.
+        if ((validAnchors.last - focusMax).abs() > 0.05) {
+          validAnchors.add(focusMax);
+        }
+        // Build stops: anchor + 2 intermediates between consecutive anchors.
+        final List<double> focusStops = [];
+        for (int i = 0; i < validAnchors.length; i++) {
+          focusStops.add(validAnchors[i]);
+          if (i < validAnchors.length - 1) {
+            final a = validAnchors[i];
+            final b = validAnchors[i + 1];
+            focusStops.add(a + (b - a) / 3.0);
+            focusStops.add(a + (b - a) * 2.0 / 3.0);
+          }
+        }
         config = CameraDialConfig(
           stops: focusStops,
-          majorTickEvery: 8,
+          majorTickEvery: 3,
           formatter: (v) {
+            if (v < 0.01) return '∞';
             final metres = 1.0 / v;
             if (metres >= 100) return '∞';
             if (metres >= 1.0) return '${metres.toStringAsFixed(1)}m';
@@ -584,8 +672,8 @@ class _CameraScreenState extends State<CameraScreen> {
         );
         currentValue = focusStops.reduce(
           (a, b) =>
-              (a - _currentFocusDistance.clamp(0.1, focusMax)).abs() <
-                  (b - _currentFocusDistance.clamp(0.1, focusMax)).abs()
+              (a - _currentFocusDistance.clamp(0.0, focusMax)).abs() <
+                  (b - _currentFocusDistance.clamp(0.0, focusMax)).abs()
               ? a
               : b,
         );
@@ -596,40 +684,23 @@ class _CameraScreenState extends State<CameraScreen> {
         return const SizedBox.shrink();
     }
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      decoration: BoxDecoration(
-        color: kPanelColor.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: kBorderColor),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Param label (e.g. "ZOOM", "FOCUS")
-          Padding(
-            padding: const EdgeInsets.only(bottom: 2, left: 2),
-            child: Text(
-              p.label,
-              style: const TextStyle(
-                color: kTextMuted,
-                fontSize: 10,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 600),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+          decoration: BoxDecoration(
+            color: kPanelColor.withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: kBorderColor),
           ),
-          // The ruler slider — horizontal drag, center-locked indicator,
-          // inertia + magnetic snap (all self-contained in CameraRulerSlider).
-          CameraRulerSlider(
-            key: ValueKey(p), // reset inertia/snap state when param changes
+          child: CameraRulerSlider(
+            key: ValueKey(p),
             config: config,
             initialValue: currentValue,
             onChanged: onChanged,
           ),
-        ],
+        ),
       ),
     );
   }
