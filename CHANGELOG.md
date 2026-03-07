@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-03-07 (update 5)
+
+### Manual-only exposure controls
+
+- Removed AE/EV from the Flutter camera UI so exposure is always controlled directly with the ISO and shutter sliders.
+- Defaulted the native camera pipeline to manual exposure mode on startup and applied stored ISO/shutter settings immediately after binding the camera.
+
+## 2026-03-07 (update 4)
+
+### All params now use floating CameraRulerSlider — no drawer expansion
+
+- Removed the bottom dial-panel expansion entirely from `CameraSettingsDrawer`; it is now a pure stateless 52-px icon strip with no internal slider/dial state.
+- Added ISO, Shutter, and EV cases to `_buildHoverSlider()` in `main.dart` so all 6 params show the floating `CameraRulerSlider` overlay above the strip.
+- Simplified `CameraSettingsDrawer` constructor: removed `isoRange`, `exposureTimeRangeNs`, `exposureOffsetRange`, `minFocusDistance`, `minZoomRatio`, `maxZoomRatio`, and all `onXxxChanged` callbacks (those now live entirely in `main.dart`).
+
+## 2026-03-07 (update 3)
+
+### Floating CameraRulerSlider overlay for Zoom / Focus / WB
+
+- Replaced bottom dial-panel expansion for Zoom, Focus, and WB with a floating `CameraRulerSlider` overlay that hovers above the camera preview; ISO / Shutter / EV still use the `CameraDial` bottom panel.
+- Added `hoverParam` + `onHoverParamTap` to `CameraSettingsDrawer`; floating-param chips are routed through `_kFloatingParams`, lifting state to `main.dart`. Chip highlight works for both bottom-panel (`_activeParam`) and floating-overlay (`hoverParam`) params.
+- Fixed `num`→`double` cast for `withOpacity` in `CameraRulerSlider._RulerPainter`.
+
 ## 2026-03-07
 
 ### Full UI redesign — Material dark + deep blue theme

@@ -60,24 +60,6 @@ class CameraControl {
   static Future<void> setFocusDistance(double distance) =>
       _method.invokeMethod('setFocusDistance', {'distance': distance});
 
-  // ── Auto exposure / EV ────────────────────────────────────────────
-
-  static Future<void> setAeEnabled(bool enabled) =>
-      _method.invokeMethod('setAeEnabled', {'enabled': enabled});
-
-  static Future<double> getExposureOffsetStep() async {
-    final result = await _method.invokeMethod<double>('getExposureOffsetStep');
-    return result ?? 0.0;
-  }
-
-  static Future<List<int>> getExposureOffsetRange() async {
-    final result = await _method.invokeMethod<List>('getExposureOffsetRange');
-    return result?.cast<int>() ?? [0, 0];
-  }
-
-  static Future<void> setExposureOffset(int index) =>
-      _method.invokeMethod('setExposureOffset', {'index': index});
-
   // ── Manual sensor (ISO + shutter) ────────────────────────────────
 
   static Future<List<int>> getExposureTimeRangeNs() async {

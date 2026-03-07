@@ -7,7 +7,10 @@ import 'package:flutter/services.dart';
 import 'app_theme.dart';
 import 'camera_control.dart';
 import 'widgets/bottom_info_bar.dart';
+import 'widgets/camera_dial/dial_config.dart'; // CameraParam enum
 import 'widgets/camera_settings_drawer.dart';
+import 'widgets/camera_slider/camera_dial_config.dart';
+import 'widgets/camera_slider/camera_ruler_slider.dart';
 import 'widgets/canvas_view.dart';
 import 'widgets/left_toolbar.dart';
 import 'widgets/mini_map.dart';
@@ -68,19 +71,13 @@ class _CameraScreenState extends State<CameraScreen> {
 
   // ── Camera controls ────────────────────────────────────────────────
   bool _afEnabled = true;
-  bool _aeEnabled = true;
   bool _wbLocked = false;
 
   // Focus
   double _minFocusDistance = 0.0;
   double _currentFocusDistance = 0.0;
 
-  // EV offset (AE-on path)
-  int _exposureOffsetIndex = 0;
-  List<int> _exposureOffsetRange = [0, 0];
-  double _exposureOffsetStep = 0.0;
-
-  // Manual sensor exposure + ISO (AE-off path)
+  // Manual sensor exposure + ISO
   int _exposureTimeNs = 1000000; // 1 ms default
   List<int> _exposureTimeRangeNs = [1000000, 1000000000];
   int _isoValue = 200;
@@ -104,6 +101,11 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isScanning = false;
   bool _showCanvas = false;
   bool _settingsDrawerOpen = false;
+
+  /// Which "floating" param is currently showing its [CameraRulerSlider]
+  /// overlay above the camera preview.  Null = no overlay visible.
+  /// Set by [_onHoverParamTap]; cleared when the drawer is closed.
+  CameraParam? _hoverParam;
 
   // ── Session timer ─────────────────────────────────────────────────
   int _sessionSeconds = 0;
@@ -143,12 +145,10 @@ class _CameraScreenState extends State<CameraScreen> {
       // Fetch device capability ranges in parallel
       final results = await Future.wait([
         CameraControl.getMinFocusDistance(),
-        CameraControl.getExposureOffsetStep().then((v) => v),
         CameraControl.getMinZoomRatio(),
         CameraControl.getMaxZoomRatio(),
       ]);
       final listResults = await Future.wait([
-        CameraControl.getExposureOffsetRange(),
         CameraControl.getExposureTimeRangeNs(),
         CameraControl.getIsoRange(),
       ]);
@@ -160,19 +160,16 @@ class _CameraScreenState extends State<CameraScreen> {
           0.0,
           _minFocusDistance,
         );
-        _exposureOffsetStep = results[1];
-        _minZoomRatio = results[2];
-        _maxZoomRatio = results[3];
+        _minZoomRatio = results[1];
+        _maxZoomRatio = results[2];
         _currentZoomRatio = _minZoomRatio;
 
-        _exposureOffsetRange = listResults[0];
-        _exposureOffsetIndex = 0;
-        _exposureTimeRangeNs = listResults[1];
+        _exposureTimeRangeNs = listResults[0];
         _exposureTimeNs = _exposureTimeRangeNs[0].clamp(
           1000000,
           _exposureTimeRangeNs[1],
         );
-        _isoRange = listResults[2];
+        _isoRange = listResults[1];
         _isoValue = _isoRange[0].clamp(200, _isoRange[1]);
       });
 
@@ -249,18 +246,6 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
-  Future<void> _toggleAe() async {
-    final prev = _aeEnabled;
-    setState(() => _aeEnabled = !_aeEnabled);
-    try {
-      await CameraControl.setAeEnabled(_aeEnabled);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _aeEnabled = prev);
-      _showError('AE toggle failed: $e');
-    }
-  }
-
   Future<void> _toggleAf() async {
     final prev = _afEnabled;
     if (_afEnabled) {
@@ -297,6 +282,12 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
+  /// Called by [CameraSettingsDrawer] when the user taps a chip in the strip.
+  /// Toggling the same chip collapses the floating overlay.
+  void _onHoverParamTap(CameraParam? p) {
+    setState(() => _hoverParam = p);
+  }
+
   void _onIsoChanged(int iso) {
     setState(() => _isoValue = iso);
     CameraControl.setIso(iso);
@@ -305,11 +296,6 @@ class _CameraScreenState extends State<CameraScreen> {
   void _onExposureTimeNsChanged(int ns) {
     setState(() => _exposureTimeNs = ns);
     CameraControl.setExposureTimeNs(ns);
-  }
-
-  void _onEvIndexChanged(int index) {
-    setState(() => _exposureOffsetIndex = index);
-    CameraControl.setExposureOffset(index);
   }
 
   void _onFocusChanged(double dist) {
@@ -368,8 +354,11 @@ class _CameraScreenState extends State<CameraScreen> {
             canExport: false,
             onToggleScan: _toggleScan,
             onToggleCanvas: () => setState(() => _showCanvas = !_showCanvas),
-            onToggleSettings: () =>
-                setState(() => _settingsDrawerOpen = !_settingsDrawerOpen),
+            onToggleSettings: () => setState(() {
+              _settingsDrawerOpen = !_settingsDrawerOpen;
+              // Collapse the floating slider when the whole drawer is closed.
+              if (!_settingsDrawerOpen) _hoverParam = null;
+            }),
             onReset: _onReset,
             onExport: _onExport,
           ),
@@ -415,30 +404,17 @@ class _CameraScreenState extends State<CameraScreen> {
                       if (_cameraStarted)
                         CameraSettingsDrawer(
                           isOpen: _settingsDrawerOpen,
-                          aeEnabled: _aeEnabled,
+                          hoverParam: _hoverParam,
+                          onHoverParamTap: _onHoverParamTap,
                           afEnabled: _afEnabled,
                           wbLocked: _wbLocked,
-                          isoValue: _isoValue,
-                          isoRange: _isoRange,
-                          exposureTimeNs: _exposureTimeNs,
-                          exposureTimeRangeNs: _exposureTimeRangeNs,
-                          exposureOffsetIndex: _exposureOffsetIndex,
-                          exposureOffsetRange: _exposureOffsetRange,
-                          exposureOffsetStep: _exposureOffsetStep,
-                          focusDistance: _currentFocusDistance,
-                          minFocusDistance: _minFocusDistance,
-                          zoomRatio: _currentZoomRatio,
-                          minZoomRatio: _minZoomRatio,
-                          maxZoomRatio: _maxZoomRatio,
-                          onToggleAe: _toggleAe,
                           onToggleAf: _toggleAf,
                           onLockWb: _lockWb,
                           onUnlockWb: _unlockWb,
-                          onIsoChanged: _onIsoChanged,
-                          onExposureTimeNsChanged: _onExposureTimeNsChanged,
-                          onEvIndexChanged: _onEvIndexChanged,
-                          onFocusChanged: _onFocusChanged,
-                          onZoomChanged: _onZoomChanged,
+                          isoValue: _isoValue,
+                          exposureTimeNs: _exposureTimeNs,
+                          focusDistance: _currentFocusDistance,
+                          zoomRatio: _currentZoomRatio,
                         ),
                       BottomInfoBar(
                         isScanning: _isScanning,
@@ -452,6 +428,24 @@ class _CameraScreenState extends State<CameraScreen> {
                   ),
                 ),
 
+                // Floating ruler slider — hovers above the icon strip.
+                // Only shown when the drawer is open and a chip is active.
+                //
+                // Vertical position: bottom of screen minus info bar (36 px) +
+                // settings strip (52 px) + 12 px breathing room = 100 px.
+                if (_hoverParam != null &&
+                    _settingsDrawerOpen &&
+                    _cameraStarted)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 100,
+                    // Cap height so the panel can never grow tall enough to
+                    // overlap with widgets pinned to the top of the screen.
+                    height: 140,
+                    child: _buildHoverSlider(),
+                  ),
+
                 // Resolution debug badge (top-left, subtle)
                 if (_cameraStarted)
                   Positioned(top: 8, left: 8, child: _buildResolutionBadge()),
@@ -459,6 +453,224 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Floating hover slider ─────────────────────────────────────────
+
+  /// Builds the floating [CameraRulerSlider] (or WB action panel) that hovers
+  /// above the camera preview when a floating-param chip is selected.
+  ///
+  /// The widget is positioned by the parent [Positioned] at `bottom: 100`,
+  /// sitting above the icon strip (52 px) + info bar (36 px) + gap (12 px).
+  Widget _buildHoverSlider() {
+    final p = _hoverParam;
+    if (p == null) return const SizedBox.shrink();
+    if (p == CameraParam.wb) return _buildHoverWb();
+
+    // ── Ruler config per param ─────────────────────────────────────────────
+    //
+    // CameraDialConfig uses the same log/linear convention as DialConfig but
+    // is the config type expected by CameraRulerSlider (camera_slider/).
+    final CameraDialConfig config;
+    final double currentValue;
+    final ValueChanged<double> onChanged;
+
+    switch (p) {
+      case CameraParam.iso:
+        // Log scale: ISO 100 → device max. Photographers perceive ISO in
+        // stops (×2), so equal ruler distance = equal perceived exposure change.
+        final isoMax = _isoRange.length >= 2 && _isoRange[1] > _isoRange[0]
+            ? _isoRange[1].toDouble()
+            : 6400.0;
+        config = CameraDialConfig(
+          min: _isoRange.isNotEmpty ? _isoRange[0].toDouble() : 100.0,
+          max: isoMax,
+          ticks: 60,
+          majorTickEvery: 6,
+          logarithmic: true,
+          clamp: true,
+          formatValue: (v) => v.round().toString(),
+        );
+        currentValue = _isoValue.toDouble();
+        onChanged = (v) => _onIsoChanged(v.round());
+        break;
+
+      case CameraParam.shutter:
+        // Log scale in nanoseconds: device min → 1 s max.
+        final shutterMin = _exposureTimeRangeNs.isNotEmpty
+            ? _exposureTimeRangeNs[0].toDouble()
+            : 125000.0; // ≈ 1/8000 s
+        final shutterMax = _exposureTimeRangeNs.length >= 2
+            ? _exposureTimeRangeNs[1].toDouble().clamp(shutterMin, 1e9)
+            : 1e9; // 1 s
+        config = CameraDialConfig(
+          min: shutterMin,
+          max: shutterMax,
+          ticks: 100,
+          majorTickEvery: 10,
+          logarithmic: true,
+          clamp: true,
+          formatValue: (v) {
+            final secs = v / 1e9;
+            if (secs < 1.0) {
+              final denom = (1.0 / secs).round();
+              return '1/$denom';
+            }
+            return '${secs.toStringAsFixed(1)}s';
+          },
+        );
+        currentValue = _exposureTimeNs.toDouble();
+        onChanged = (v) => _onExposureTimeNsChanged(v.round());
+        break;
+
+      case CameraParam.zoom:
+        // Log scale: widest angle → max zoom.
+        final zoomMax = _maxZoomRatio > _minZoomRatio + 0.1
+            ? _maxZoomRatio
+            : _minZoomRatio + 1.0;
+        config = CameraDialConfig(
+          min: _minZoomRatio,
+          max: zoomMax,
+          ticks: 60,
+          majorTickEvery: 6,
+          logarithmic: true,
+          clamp: true,
+          formatValue: (v) => '${v.toStringAsFixed(1)}×',
+        );
+        currentValue = _currentZoomRatio;
+        onChanged = (v) => _onZoomChanged(v);
+        break;
+
+      case CameraParam.focus:
+        // Log scale: ~infinity (0.1 D) → closest focus (_minFocusDistance D).
+        final focusMax = _minFocusDistance > 0.1 ? _minFocusDistance : 10.0;
+        config = CameraDialConfig(
+          min: 0.1,
+          max: focusMax,
+          ticks: 80,
+          majorTickEvery: 8,
+          logarithmic: true,
+          clamp: true,
+          formatValue: (v) {
+            final metres = 1.0 / v;
+            if (metres >= 100) return '∞';
+            if (metres >= 1.0) return '${metres.toStringAsFixed(1)}m';
+            return '${(metres * 100).round()}cm';
+          },
+        );
+        currentValue = _currentFocusDistance.clamp(0.1, focusMax);
+        onChanged = (v) => _onFocusChanged(v);
+        break;
+
+      default:
+        return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      decoration: BoxDecoration(
+        color: kPanelColor.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: kBorderColor),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Param label (e.g. "ZOOM", "FOCUS")
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2, left: 2),
+            child: Text(
+              p.label,
+              style: const TextStyle(
+                color: kTextMuted,
+                fontSize: 10,
+                letterSpacing: 1.2,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          // The ruler slider — horizontal drag, center-locked indicator,
+          // inertia + magnetic snap (all self-contained in CameraRulerSlider).
+          CameraRulerSlider(
+            key: ValueKey(p), // reset inertia/snap state when param changes
+            config: config,
+            initialValue: currentValue,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Floating WB panel — shown instead of a numeric slider since WB has no
+  /// user-adjustable scalar; it is either running auto or locked to a captured
+  /// colour-correction matrix.
+  Widget _buildHoverWb() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      decoration: BoxDecoration(
+        color: kPanelColor.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: kBorderColor),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _hoverWbButton(
+            label: 'Auto AWB',
+            icon: Icons.wb_auto,
+            isActive: !_wbLocked,
+            // onTap is null when this state is already active
+            onTap: _wbLocked ? _unlockWb : null,
+          ),
+          const SizedBox(width: 16),
+          _hoverWbButton(
+            label: 'Lock WB',
+            icon: Icons.lock,
+            isActive: _wbLocked,
+            onTap: !_wbLocked ? _lockWb : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A single action button used in the floating WB panel.
+  Widget _hoverWbButton({
+    required String label,
+    required IconData icon,
+    required bool isActive,
+    VoidCallback? onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive ? kAccent : kBorderColor,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: isActive ? Colors.white : kTextMuted),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: isActive ? Colors.white : kTextMuted,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -489,21 +701,23 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Widget _buildResolutionBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: kPanelColor.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: kBorderColor),
-      ),
-      child: Text(
-        'Cap: $_captureResolution  |  Ana: $_analysisResolution'
-        '  |  ${_fps.toStringAsFixed(1)} fps',
-        style: const TextStyle(
-          color: kTextMuted,
-          fontSize: 9,
-          fontFamily: 'monospace',
-          letterSpacing: 0.3,
+    return RepaintBoundary(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: kPanelColor.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: kBorderColor),
+        ),
+        child: Text(
+          'Cap: $_captureResolution  |  Ana: $_analysisResolution'
+          '  |  ${_fps.toStringAsFixed(1)} fps',
+          style: const TextStyle(
+            color: kTextMuted,
+            fontSize: 9,
+            fontFamily: 'monospace',
+            letterSpacing: 0.3,
+          ),
         ),
       ),
     );
