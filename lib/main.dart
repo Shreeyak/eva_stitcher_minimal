@@ -308,35 +308,57 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   List<double> _buildIsoStops() {
-    // Standard 1/3-stop ISO values; filtered to device's reported range.
+    // 1/3-stop values with one geometric-mean intermediate between each pair
+    // → ~1/6-stop spacing. Full stops (50,100,...,6400) land at every 6th index
+    // so majorTickEvery=6 labels them as major ticks.
     const all = <double>[
       50,
+      57,
       64,
+      72,
       80,
+      90,
       100,
+      112,
       125,
+      141,
       160,
+      179,
       200,
+      224,
       250,
+      283,
       320,
+      358,
       400,
+      447,
       500,
+      566,
       640,
+      716,
       800,
+      894,
       1000,
+      1118,
       1250,
+      1414,
       1600,
+      1789,
       2000,
+      2236,
       2500,
+      2828,
       3200,
+      3578,
       4000,
+      4472,
       5000,
+      5657,
       6400,
     ];
     final minIso = _isoRange[0].toDouble();
     final maxIso = _isoRange[1].toDouble();
     final filtered = all.where((v) => v >= minIso && v <= maxIso).toList();
-    // Always include at least the clamped min and max.
     if (filtered.isEmpty) return [minIso, maxIso];
     return filtered;
   }
@@ -561,7 +583,7 @@ class _CameraScreenState extends State<CameraScreen> {
         final isoStops = _buildIsoStops();
         config = CameraDialConfig(
           stops: isoStops,
-          majorTickEvery: 3,
+          majorTickEvery: 6,
           formatter: (v) => v.round().toString(),
         );
         currentValue = isoStops.reduce(
@@ -607,8 +629,7 @@ class _CameraScreenState extends State<CameraScreen> {
         for (int z = firstInt; z <= lastInt; z++) {
           zoomStops.add(z.toDouble());
           if (z < lastInt) {
-            zoomStops.add(z + 1 / 3.0);
-            zoomStops.add(z + 2 / 3.0);
+            zoomStops.add(z + 0.5);
           }
         }
         // If device max isn't exactly an integer (e.g. 9.8×), append it.
@@ -616,7 +637,7 @@ class _CameraScreenState extends State<CameraScreen> {
         if (zoomStops.length < 2) zoomStops.add(zoomMax);
         config = CameraDialConfig(
           stops: zoomStops,
-          majorTickEvery: 3,
+          majorTickEvery: 2,
           formatter: (v) {
             // Clean integer label at integer stops; one decimal otherwise.
             if ((v - v.roundToDouble()).abs() < 0.05) return '${v.round()}×';
@@ -686,19 +707,20 @@ class _CameraScreenState extends State<CameraScreen> {
 
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 600),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-          decoration: BoxDecoration(
-            color: kPanelColor.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: kBorderColor),
-          ),
-          child: CameraRulerSlider(
-            key: ValueKey(p),
-            config: config,
-            initialValue: currentValue,
-            onChanged: onChanged,
+        constraints: const BoxConstraints(maxWidth: 400),
+        // ClipRRect is the capsule clip boundary — no padding so ticks fill
+        // edge-to-edge and are smoothly cut by the curve.
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(100),
+          child: ColoredBox(
+            color: const Color(0xFF121212).withValues(alpha: 0.8),
+            child: CameraRulerSlider(
+              key: ValueKey(p),
+              config: config,
+              initialValue: currentValue,
+              onChanged: onChanged,
+              fadeColor: const Color(0xFF121212),
+            ),
           ),
         ),
       ),

@@ -48,12 +48,17 @@ class CameraRulerSlider extends StatefulWidget {
   /// Whether fling inertia is active after drag release. Defaults to false.
   final bool enableInertia;
 
+  /// Color the edge-fade gradient blends into.
+  /// Set this to match the container background so the fade looks seamless.
+  final Color fadeColor;
+
   const CameraRulerSlider({
     super.key,
     required this.config,
     required this.initialValue,
     required this.onChanged,
     this.enableInertia = false,
+    this.fadeColor = Colors.black,
   });
 
   @override
@@ -291,19 +296,22 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                     ),
                   ),
 
-                  // Edge fade — horizontal gradient over the full widget.
+                  // Edge fade — blends into fadeColor so the capsule clip
+                  // looks seamless rather than abruptly cutting ticks.
                   Positioned.fill(
                     child: IgnorePointer(
                       child: Container(
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
-                              Colors.black,
-                              Colors.transparent,
-                              Colors.transparent,
-                              Colors.black,
+                              widget.fadeColor.withValues(alpha: 0.80),
+                              widget.fadeColor.withValues(alpha: 0.60),
+                              widget.fadeColor.withValues(alpha: 0),
+                              widget.fadeColor.withValues(alpha: 0),
+                              widget.fadeColor.withValues(alpha: 0.60),
+                              widget.fadeColor.withValues(alpha: 0.80),
                             ],
-                            stops: [0, 0.10, 0.90, 1],
+                            stops: const [0, 0.18, 0.32, 0.68, 0.82, 1],
                           ),
                         ),
                       ),
@@ -366,8 +374,8 @@ class _LabelsPainter extends CustomPainter {
     final double centerX = rulerOffset + visualIndex * tickSpacing;
 
     // Labels sit just above the tick strip.
-    // Bottom of text aligns to (tickTop - 4).
-    const double labelBaselineY = -4.0;
+    // Bottom of text aligns to (tickTop - 6).
+    const double labelBaselineY = -2.0;
 
     // Minimum pixel gap between the edge of one label and the start of the next.
     const double minGap = 18.0;
