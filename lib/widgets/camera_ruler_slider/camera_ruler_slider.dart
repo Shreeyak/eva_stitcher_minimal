@@ -244,72 +244,83 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
           final dx = constraints.maxWidth / 2 - _visualIndex * tickSpacing;
 
           return GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onHorizontalDragUpdate: (d) {
               if (widget.enableInertia) trackVelocity(d.delta.dx);
               updateDrag(d.delta.dx);
             },
             onHorizontalDragEnd: (_) => onDragEnd(),
-            child: Stack(
-              children: [
-                // Texture layer — GPU translation, zero CPU per frame.
-                Transform.translate(
-                  offset: Offset(dx, 0),
-                  child: RawImage(image: rulerCache),
-                ),
-
-                // Labels painted on top; cheap (text only, no image ops).
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: CustomPaint(
-                      painter: _LabelsPainter(
-                        visualIndex: _visualIndex,
-                        config: widget.config,
-                        rulerOffset: dx,
-                      ),
+            child: ClipRect(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Strip — Positioned so RawImage uses its intrinsic (full) width.
+                  // ClipRect above keeps it from overflowing the widget bounds.
+                  Positioned(
+                    left: dx,
+                    top: 0,
+                    height: _cacheHeight,
+                    child: RawImage(
+                      image: rulerCache,
+                      fit: BoxFit.none,
+                      alignment: Alignment.topLeft,
                     ),
                   ),
-                ),
 
-                // Edge fade — widget gradient, GPU composited.
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.black,
-                            Colors.transparent,
-                            Colors.transparent,
-                            Colors.black,
-                          ],
-                          stops: [0, 0.12, 0.88, 1],
+                  // Labels painted on top; cheap (text only, no image ops).
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _LabelsPainter(
+                          visualIndex: _visualIndex,
+                          config: widget.config,
+                          rulerOffset: dx,
                         ),
                       ),
                     ),
                   ),
-                ),
 
-                // Center glow — widget gradient, GPU composited.
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.transparent,
-                            Colors.white.withValues(alpha: 0.15),
-                            Colors.transparent,
-                          ],
-                          stops: const [0.44, 0.5, 0.56],
+                  // Edge fade — widget gradient, GPU composited.
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.black,
+                              Colors.transparent,
+                              Colors.transparent,
+                              Colors.black,
+                            ],
+                            stops: [0, 0.12, 0.88, 1],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
 
-                const Center(child: _Indicator()),
-              ],
-            ),
+                  // Center glow — widget gradient, GPU composited.
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.transparent,
+                              Colors.white.withValues(alpha: 0.15),
+                              Colors.transparent,
+                            ],
+                            stops: const [0.44, 0.5, 0.56],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const Center(child: _Indicator()),
+                ],
+              ), // Stack
+            ), // ClipRect
           );
         },
       ),
