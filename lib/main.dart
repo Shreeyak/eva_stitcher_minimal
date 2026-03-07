@@ -368,115 +368,121 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kBgColor,
-      body: Row(
-        children: [
-          // ── Left toolbar ──
-          LeftToolbar(
-            isScanning: _isScanning,
-            showCanvas: _showCanvas,
-            settingsOpen: _settingsDrawerOpen,
-            canExport: false,
-            onToggleScan: _toggleScan,
-            onToggleCanvas: () => setState(() => _showCanvas = !_showCanvas),
-            onToggleSettings: () => setState(() {
-              _settingsDrawerOpen = !_settingsDrawerOpen;
-              // Collapse the floating slider when the whole drawer is closed.
-              if (!_settingsDrawerOpen) _hoverParam = null;
-            }),
-            onReset: _onReset,
-            onExport: _onExport,
-          ),
+      body: SafeArea(
+        top: true,
+        bottom: false,
+        left: false,
+        right: false,
+        child: Row(
+          children: [
+            // ── Left toolbar ──
+            LeftToolbar(
+              isScanning: _isScanning,
+              showCanvas: _showCanvas,
+              settingsOpen: _settingsDrawerOpen,
+              canExport: false,
+              onToggleScan: _toggleScan,
+              onToggleCanvas: () => setState(() => _showCanvas = !_showCanvas),
+              onToggleSettings: () => setState(() {
+                _settingsDrawerOpen = !_settingsDrawerOpen;
+                // Collapse the floating slider when the whole drawer is closed.
+                if (!_settingsDrawerOpen) _hoverParam = null;
+              }),
+              onReset: _onReset,
+              onExport: _onExport,
+            ),
 
-          // ── Main content area ──
-          Expanded(
-            child: Stack(
-              children: [
-                // Camera preview (always rendered behind everything)
-                if (_permissionGranted)
-                  Positioned.fill(
-                    child: GestureDetector(
-                      onTap: _cameraStarted ? _tapToLockWb : null,
-                      child: _buildCameraPreview(),
-                    ),
-                  )
-                else
-                  const Center(
-                    child: Text(
-                      'Camera permission required',
-                      style: TextStyle(color: kTextSecondary, fontSize: 16),
-                    ),
-                  ),
-
-                // Canvas overlay (toggled by toolbar)
-                if (_showCanvas) const Positioned.fill(child: CanvasView()),
-
-                // MiniMap — top right
-                const Positioned(
-                  top: 8,
-                  right: 8,
-                  child: MiniMap(frameCount: 0),
-                ),
-
-                // Settings drawer + info bar pinned to bottom
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_cameraStarted)
-                        CameraSettingsDrawer(
-                          isOpen: _settingsDrawerOpen,
-                          hoverParam: _hoverParam,
-                          onHoverParamTap: _onHoverParamTap,
-                          afEnabled: _afEnabled,
-                          wbLocked: _wbLocked,
-                          onToggleAf: _toggleAf,
-                          onLockWb: _lockWb,
-                          onUnlockWb: _unlockWb,
-                          isoValue: _isoValue,
-                          exposureTimeNs: _exposureTimeNs,
-                          focusDistance: _currentFocusDistance,
-                          zoomRatio: _currentZoomRatio,
-                        ),
-                      BottomInfoBar(
-                        isScanning: _isScanning,
-                        frameCount: _frameCount,
-                        stitchedCount: _stitchedCount,
-                        totalTarget: 0,
-                        coveragePct: 0.0,
-                        sessionSeconds: _sessionSeconds,
+            // ── Main content area ──
+            Expanded(
+              child: Stack(
+                children: [
+                  // Camera preview (always rendered behind everything)
+                  if (_permissionGranted)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        onTap: _cameraStarted ? _tapToLockWb : null,
+                        child: _buildCameraPreview(),
                       ),
-                    ],
-                  ),
-                ),
+                    )
+                  else
+                    const Center(
+                      child: Text(
+                        'Camera permission required',
+                        style: TextStyle(color: kTextSecondary, fontSize: 16),
+                      ),
+                    ),
 
-                // Floating ruler slider — hovers above the icon strip.
-                // Only shown when the drawer is open and a chip is active.
-                //
-                // Vertical position: bottom of screen minus info bar (36 px) +
-                // settings strip (52 px) + 12 px breathing room = 100 px.
-                if (_hoverParam != null &&
-                    _settingsDrawerOpen &&
-                    _cameraStarted)
+                  // Canvas overlay (toggled by toolbar)
+                  if (_showCanvas) const Positioned.fill(child: CanvasView()),
+
+                  // MiniMap — top right
+                  const Positioned(
+                    top: 8,
+                    right: 8,
+                    child: MiniMap(frameCount: 0),
+                  ),
+
+                  // Settings drawer + info bar pinned to bottom
                   Positioned(
                     left: 0,
                     right: 0,
-                    bottom: 100,
-                    // Cap height so the panel can never grow tall enough to
-                    // overlap with widgets pinned to the top of the screen.
-                    height: 140,
-                    child: _buildHoverSlider(),
+                    bottom: 0,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_cameraStarted)
+                          CameraSettingsDrawer(
+                            isOpen: _settingsDrawerOpen,
+                            hoverParam: _hoverParam,
+                            onHoverParamTap: _onHoverParamTap,
+                            afEnabled: _afEnabled,
+                            wbLocked: _wbLocked,
+                            onToggleAf: _toggleAf,
+                            onLockWb: _lockWb,
+                            onUnlockWb: _unlockWb,
+                            isoValue: _isoValue,
+                            exposureTimeNs: _exposureTimeNs,
+                            focusDistance: _currentFocusDistance,
+                            zoomRatio: _currentZoomRatio,
+                          ),
+                        BottomInfoBar(
+                          isScanning: _isScanning,
+                          frameCount: _frameCount,
+                          stitchedCount: _stitchedCount,
+                          totalTarget: 0,
+                          coveragePct: 0.0,
+                          sessionSeconds: _sessionSeconds,
+                        ),
+                      ],
+                    ),
                   ),
 
-                // Resolution debug badge (top-left, subtle)
-                if (_cameraStarted)
-                  Positioned(top: 8, left: 8, child: _buildResolutionBadge()),
-              ],
+                  // Floating ruler slider — hovers above the icon strip.
+                  // Only shown when the drawer is open and a chip is active.
+                  //
+                  // Vertical position: bottom of screen minus info bar (36 px) +
+                  // settings strip (52 px) + 12 px breathing room = 100 px.
+                  if (_hoverParam != null &&
+                      _settingsDrawerOpen &&
+                      _cameraStarted)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 100,
+                      // Cap height so the panel can never grow tall enough to
+                      // overlap with widgets pinned to the top of the screen.
+                      height: 140,
+                      child: _buildHoverSlider(),
+                    ),
+
+                  // Resolution debug badge (top-left, subtle)
+                  if (_cameraStarted)
+                    Positioned(top: 8, left: 8, child: _buildResolutionBadge()),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

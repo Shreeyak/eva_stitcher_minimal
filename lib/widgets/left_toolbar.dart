@@ -70,12 +70,6 @@ class LeftToolbar extends StatelessWidget {
                   isActive: showCanvas,
                   onTap: onToggleCanvas,
                 ),
-                SideButton(
-                  icon: Icons.tune,
-                  label: 'Settings',
-                  isActive: settingsOpen,
-                  onTap: onToggleSettings,
-                ),
                 SideButton(icon: Icons.refresh, label: 'Reset', onTap: onReset),
               ],
             ),
@@ -83,6 +77,13 @@ class LeftToolbar extends StatelessWidget {
 
           // Bottom: Export
           const Divider(height: 1, thickness: 1, color: kBorderColor),
+          // Settings moved to bottom above Export
+          SideButton(
+            icon: Icons.tune,
+            label: 'Settings',
+            isActive: settingsOpen,
+            onTap: onToggleSettings,
+          ),
           SideButton(
             icon: Icons.download_outlined,
             label: 'Export',
