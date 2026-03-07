@@ -44,12 +44,15 @@ class CameraRulerSlider extends StatefulWidget {
   final CameraDialConfig config;
   final double initialValue;
   final ValueChanged<double> onChanged;
+  /// Whether fling inertia is active after drag release. Defaults to false.
+  final bool enableInertia;
 
   const CameraRulerSlider({
     super.key,
     required this.config,
     required this.initialValue,
     required this.onChanged,
+    this.enableInertia = false,
   });
 
   @override
@@ -57,11 +60,8 @@ class CameraRulerSlider extends StatefulWidget {
 }
 
 class _CameraRulerSliderState extends State<CameraRulerSlider> {
-  /// Snapped stop index — advances one step per tick during drag.
-  int _currentIndex = 0;
-
-  /// Sub-tick pixel accumulator — controls *when* the index advances, not used for visuals.
-  double _dragAccum = 0;
+  /// Float 0..1 position — fractional during drag, snapped to a stop at rest.
+  double _visualPercent = 0;
 
   /// velocity in pixels/sec for inertia
   double velocity = 0;
@@ -76,14 +76,15 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   static const double tickSpacing = 22;
   static const double _cacheHeight = 100;
 
-  /// Always the snapped integer position — visual and haptic snap happen together, no glide-between-ticks.
-  double get _visualIndex => _currentIndex.toDouble();
+  /// Fractional index — smooth during drag, integer-aligned at rest.
+  double get _visualIndex => _visualPercent * (widget.config.stopCount - 1);
 
   @override
   void initState() {
     super.initState();
     final idx = widget.config.stops.indexOf(widget.initialValue);
-    _currentIndex = (idx < 0 ? 0 : idx).clamp(0, widget.config.stopCount - 1);
+    final clampedIdx = (idx < 0 ? 0 : idx).clamp(0, widget.config.stopCount - 1);
+    _visualPercent = widget.config.indexToPercent(clampedIdx);
     _buildCache();
   }
 
@@ -140,21 +141,31 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
     }
   }
 
-  // Accumulate raw pixels; advance index by 1 stop per tickSpacing px so snap and haptic fire together.
+  // Move smoothly as a float — no snapping during drag.
   void updateDrag(double delta) {
-    _dragAccum += delta;
-    final steps = (_dragAccum / tickSpacing).truncate();
-    if (steps != 0) {
-      _dragAccum -= steps * tickSpacing;
-      final newIndex =
-          (_currentIndex - steps).clamp(0, widget.config.stopCount - 1);
-      if (newIndex != _currentIndex) {
-        _currentIndex = newIndex;
-        HapticFeedback.selectionClick();
-        widget.onChanged(widget.config.stops[_currentIndex]);
-      }
+    final percentPerPixel = 1.0 / ((widget.config.stopCount - 1) * tickSpacing);
+    setState(() {
+      _visualPercent = (_visualPercent - delta * percentPerPixel).clamp(0.0, 1.0);
+    });
+  }
+
+  // Snap in the direction of movement using velocity (temporally smoothed, not
+  // susceptible to end-of-gesture jitter). Right drag (velocity > 0) → snap up;
+  // left drag (velocity < 0) → snap down.
+  void _snapNow() {
+    final fractional = _visualPercent * (widget.config.stopCount - 1);
+    int index;
+    if (velocity > 0) {
+      index = fractional.ceil(); // dragged right → snap up
+    } else if (velocity < 0) {
+      index = fractional.floor(); // dragged left → snap down
+    } else {
+      index = fractional.round();
     }
-    setState(() {});
+    index = index.clamp(0, widget.config.stopCount - 1);
+    _visualPercent = widget.config.indexToPercent(index);
+    widget.onChanged(widget.config.stops[index]);
+    HapticFeedback.selectionClick();
   }
 
   /// Track drag velocity
@@ -167,7 +178,7 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
     lastTime = now;
   }
 
-  /// Inertial scrolling after drag release, then flush residual accumulator.
+  /// Inertial scroll after drag release; snap to nearest stop when coasting ends.
   void startInertia() {
     const friction = 0.88;
     inertiaTimer?.cancel();
@@ -175,19 +186,19 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
       velocity *= friction;
       if (velocity.abs() < 0.5) {
         inertiaTimer?.cancel();
-        setState(() => _dragAccum = 0);
+        setState(_snapNow);
         return;
       }
       updateDrag(velocity * 0.016);
     });
   }
 
-  /// Flush accumulator on finger lift.
+  /// Snap immediately on finger lift; start inertia only if enabled and velocity is high.
   void onDragEnd() {
-    if (velocity.abs() < 0.5) {
-      setState(() => _dragAccum = 0);
-    } else {
+    if (widget.enableInertia && velocity.abs() >= 0.5) {
       startInertia();
+    } else {
+      setState(_snapNow);
     }
   }
 
@@ -199,22 +210,85 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
 
   @override
   Widget build(BuildContext context) {
+    // Fixed _cacheHeight — no height guards needed.
+    // LayoutBuilder is used only to read maxWidth for center-lock offset.
     return SizedBox(
-      height: _CameraRulerSliderState._cacheHeight,
-      child: GestureDetector(
-        onHorizontalDragUpdate: (d) {
-          trackVelocity(d.delta.dx);
-          updateDrag(d.delta.dx);
+      height: _cacheHeight,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // dx computed here so Transform.translate gets it; compositor moves
+          // the texture layer without calling paint() each frame.
+          final dx = constraints.maxWidth / 2 - _visualIndex * tickSpacing;
+
+          return GestureDetector(
+            onHorizontalDragUpdate: (d) {
+              trackVelocity(d.delta.dx);
+              updateDrag(d.delta.dx);
+            },
+            onHorizontalDragEnd: (_) => onDragEnd(),
+            child: Stack(
+              children: [
+                // Texture layer — GPU translation, zero CPU per frame.
+                Transform.translate(
+                  offset: Offset(dx, 0),
+                  child: RawImage(image: rulerCache),
+                ),
+
+                // Labels painted on top; cheap (text only, no image ops).
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _LabelsPainter(
+                        visualIndex: _visualIndex,
+                        config: widget.config,
+                        rulerOffset: dx,
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Edge fade — widget gradient, GPU composited.
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.black,
+                            Colors.transparent,
+                            Colors.transparent,
+                            Colors.black,
+                          ],
+                          stops: [0, 0.12, 0.88, 1],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Center glow — widget gradient, GPU composited.
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.transparent,
+                            Colors.white.withOpacity(0.15),
+                            Colors.transparent,
+                          ],
+                          stops: const [0.44, 0.5, 0.56],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const Center(child: _Indicator()),
+              ],
+            ),
+          );
         },
-        onHorizontalDragEnd: (_) => onDragEnd(),
-        child: CustomPaint(
-          painter: _RulerPainter(
-            visualIndex: _visualIndex,
-            config: widget.config,
-            cache: rulerCache,
-          ),
-          child: const Center(child: _Indicator()),
-        ),
       ),
     );
   }
@@ -230,46 +304,25 @@ class _Indicator extends StatelessWidget {
   }
 }
 
-/// Painter responsible for drawing ruler ticks and labels.
-/// Uses a pre-built cached image for the tick strip, translated so the active
-/// tick always sits under the center indicator.
-class _RulerPainter extends CustomPainter {
+/// Labels-only painter — lightweight, no image ops.
+/// Glow and edge fade are handled as widget-layer gradients in build().
+class _LabelsPainter extends CustomPainter {
   final double visualIndex;
   final CameraDialConfig config;
-  final ui.Image? cache;
+  final double rulerOffset;
 
   static const double tickSpacing = 22;
 
-  _RulerPainter({
+  _LabelsPainter({
     required this.visualIndex,
     required this.config,
-    required this.cache,
+    required this.rulerOffset,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (cache == null) return;
-
-    // canvas.translate (not Offset in drawImage) keeps dx in the GPU matrix for true subpixel rendering.
-    final dx = size.width / 2 - visualIndex * tickSpacing;
-    canvas.save();
-    canvas.translate(dx, 0);
-    canvas.drawImage(cache!, Offset.zero, Paint());
-    canvas.restore();
-
-    _drawLabels(canvas, size, visualIndex, dx);
-    _drawCenterGlow(canvas, size);
-    _drawEdgeFade(canvas, size);
-  }
-
-  void _drawLabels(
-    Canvas canvas,
-    Size size,
-    double centerIndex,
-    double rulerOffset,
-  ) {
-    const labelWindow = 4; // labels within ±4 stops of center
-    final center = centerIndex.round();
+    const labelWindow = 4;
+    final center = visualIndex.round();
 
     for (int i = center - labelWindow; i <= center + labelWindow; i++) {
       if (i < 0 || i >= config.stopCount) continue;
@@ -277,18 +330,16 @@ class _RulerPainter extends CustomPainter {
       final x = rulerOffset + i * tickSpacing;
       if (x < -40 || x > size.width + 40) continue;
 
-      final distance = (i - centerIndex).abs();
+      final distance = (i - visualIndex).abs();
       final opacity = (1 - distance / labelWindow).clamp(0.0, 1.0);
 
-      final text = config.format(config.stops[i]);
       final painter = TextPainter(
         text: TextSpan(
-          text: text,
+          text: config.format(config.stops[i]),
           style: TextStyle(
             color: Colors.white.withOpacity(opacity),
             fontSize: 11,
-            fontWeight:
-                i == center ? FontWeight.w600 : FontWeight.normal,
+            fontWeight: i == center ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
         textDirection: TextDirection.ltr,
@@ -301,46 +352,9 @@ class _RulerPainter extends CustomPainter {
     }
   }
 
-  void _drawCenterGlow(Canvas canvas, Size size) {
-    final glow = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          Colors.transparent,
-          Colors.white.withOpacity(0.15),
-          Colors.transparent,
-        ],
-      ).createShader(
-        Rect.fromCenter(
-          center: Offset(size.width / 2, size.height / 2),
-          width: 120,
-          height: size.height,
-        ),
-      );
-    canvas.drawRect(
-      Rect.fromLTWH(size.width / 2 - 60, 0, 120, size.height),
-      glow,
-    );
-  }
-
-  void _drawEdgeFade(Canvas canvas, Size size) {
-    final fade = Paint()
-      ..shader = LinearGradient(
-        colors: [Colors.black, Colors.transparent],
-      ).createShader(Rect.fromLTWH(0, 0, 80, size.height));
-
-    canvas.drawRect(Rect.fromLTWH(0, 0, 80, size.height), fade);
-
-    canvas.save();
-    canvas.translate(size.width - 80, 0);
-    canvas.scale(-1, 1);
-    canvas.drawRect(Rect.fromLTWH(0, 0, 80, size.height), fade);
-    canvas.restore();
-  }
-
   @override
-  bool shouldRepaint(covariant _RulerPainter oldDelegate) {
+  bool shouldRepaint(covariant _LabelsPainter oldDelegate) {
     return oldDelegate.visualIndex != visualIndex ||
-        oldDelegate.cache != cache ||
-        oldDelegate.config != config;
+        oldDelegate.rulerOffset != rulerOffset;
   }
 }

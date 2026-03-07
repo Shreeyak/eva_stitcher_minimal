@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-07 (update 14)
+
+### CameraRulerSlider: scrolling-texture layer architecture
+
+- Replaced `CustomPainter` + `canvas.translate` with `Transform.translate` + `RawImage` — texture translation is now a compositor GPU op, zero Dart CPU per drag frame.
+- Edge fade and center glow moved to widget-layer `Container` gradients (also GPU composited, no canvas code).
+- `_RulerPainter` removed; replaced with thin `_LabelsPainter` (text-only, ~8 labels, cheap). Accumulator snapping and inertia unchanged.
+
 ## 2026-03-07 (update 13)
 
 ### CameraRulerSlider: per-tick snap during drag, subpixel rendering, no flicker
