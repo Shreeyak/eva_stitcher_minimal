@@ -44,6 +44,7 @@ class CameraRulerSlider extends StatefulWidget {
   final CameraDialConfig config;
   final double initialValue;
   final ValueChanged<double> onChanged;
+
   /// Whether fling inertia is active after drag release. Defaults to false.
   final bool enableInertia;
 
@@ -70,6 +71,9 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
 
   Timer? inertiaTimer;
 
+  /// Last tick index the indicator passed through — used for haptic + live onChanged.
+  int _lastTickIndex = 0;
+
   /// cached tick strip image
   ui.Image? rulerCache;
 
@@ -83,8 +87,12 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   void initState() {
     super.initState();
     final idx = widget.config.stops.indexOf(widget.initialValue);
-    final clampedIdx = (idx < 0 ? 0 : idx).clamp(0, widget.config.stopCount - 1);
+    final clampedIdx = (idx < 0 ? 0 : idx).clamp(
+      0,
+      widget.config.stopCount - 1,
+    );
     _visualPercent = widget.config.indexToPercent(clampedIdx);
+    _lastTickIndex = clampedIdx.toInt();
     _buildCache();
   }
 
@@ -142,30 +150,45 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   }
 
   // Move smoothly as a float — no snapping during drag.
+  // Fires haptic + onChanged each time the indicator crosses a tick boundary.
   void updateDrag(double delta) {
     final percentPerPixel = 1.0 / ((widget.config.stopCount - 1) * tickSpacing);
+    final newPercent = (_visualPercent - delta * percentPerPixel).clamp(
+      0.0,
+      1.0,
+    );
+    _checkTickCrossing(newPercent);
     setState(() {
-      _visualPercent = (_visualPercent - delta * percentPerPixel).clamp(0.0, 1.0);
+      _visualPercent = newPercent;
     });
+  }
+
+  /// Fires haptic feedback and onChanged exactly once per tick boundary crossed.
+  void _checkTickCrossing(double newPercent) {
+    final newIndex = (newPercent * (widget.config.stopCount - 1)).round().clamp(
+      0,
+      widget.config.stopCount - 1,
+    );
+    if (newIndex != _lastTickIndex) {
+      _lastTickIndex = newIndex;
+      HapticFeedback.heavyImpact();
+      widget.onChanged(widget.config.stops[newIndex]);
+    }
   }
 
   // Snap in the direction of movement using velocity (temporally smoothed, not
   // susceptible to end-of-gesture jitter). Right drag (velocity > 0) → snap up;
   // left drag (velocity < 0) → snap down.
   void _snapNow() {
-    final fractional = _visualPercent * (widget.config.stopCount - 1);
-    int index;
-    if (velocity > 0) {
-      index = fractional.ceil(); // dragged right → snap up
-    } else if (velocity < 0) {
-      index = fractional.floor(); // dragged left → snap down
-    } else {
-      index = fractional.round();
-    }
-    index = index.clamp(0, widget.config.stopCount - 1);
+    // Always snap to the nearest tick — velocity-direction snapping causes
+    // jitter on small movements because finger-lift velocity is noisy.
+    // onChanged already fires live via _checkTickCrossing; this just confirms
+    // the final resting position.
+    final index = (_visualPercent * (widget.config.stopCount - 1))
+        .round()
+        .clamp(0, widget.config.stopCount - 1);
     _visualPercent = widget.config.indexToPercent(index);
     widget.onChanged(widget.config.stops[index]);
-    HapticFeedback.selectionClick();
   }
 
   /// Track drag velocity
@@ -222,7 +245,7 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
 
           return GestureDetector(
             onHorizontalDragUpdate: (d) {
-              trackVelocity(d.delta.dx);
+              if (widget.enableInertia) trackVelocity(d.delta.dx);
               updateDrag(d.delta.dx);
             },
             onHorizontalDragEnd: (_) => onDragEnd(),
