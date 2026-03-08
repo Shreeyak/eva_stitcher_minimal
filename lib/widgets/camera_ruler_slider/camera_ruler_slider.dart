@@ -25,10 +25,13 @@ const double _kTickTop = 24.0;
 
 /// Horizontal padding reserved on each side for end icons.
 /// Ticks and labels are clipped to [_kIconPad, width − _kIconPad].
-const double _kIconPad = 52.0;
+const double _kIconPad = 44.0;
 
-/// Width of the fade zone on each edge of the inner viewport.
-const double _kFadeZone = 60.0;
+/// Fade zone as fraction of inner viewport width and min/max values.
+const double _kFadeZoneFraction = 0.22;
+const double _kFadeZoneMinPx = 20.0;
+const double _kFadeZoneMaxPx = 90.0;
+const double _kMinFadeVal = 0.3;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -36,12 +39,17 @@ const double _kFadeZone = 60.0;
 /// Applied per-tick rather than via ShaderMask so fading is correct at
 /// min/max scroll positions (ShaderMask bounds shift with scrolling content).
 double _edgeFade(double x, double viewportWidth) {
-  double t = 1.0;
-  if (x < _kFadeZone) t = (x / _kFadeZone).clamp(0.0, 1.0);
-  if (x > viewportWidth - _kFadeZone) {
-    t = ((viewportWidth - x) / _kFadeZone).clamp(0.0, 1.0);
-  }
-  return t * t * (3.0 - 2.0 * t);
+  final double fadeZone = (viewportWidth * _kFadeZoneFraction)
+      .clamp(_kFadeZoneMinPx, _kFadeZoneMaxPx)
+      .toDouble();
+
+  double t = 1.0; // fully visible, no fade
+  if (x < fadeZone) t = (x / fadeZone).clamp(0.0, 1.0);
+  if (x > viewportWidth - fadeZone) {
+    t = ((viewportWidth - x) / fadeZone).clamp(0.0, 1.0);
+  } // right edge
+  t = t * (1 - _kMinFadeVal) + _kMinFadeVal; // scale to [_kMinFadeVal, 1.0]
+  return t * t * (3.0 - 2.0 * t); // smoothstep curve
 }
 
 // ── Widget ────────────────────────────────────────────────────────────────────

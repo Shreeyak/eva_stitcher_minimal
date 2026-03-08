@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 /// Formatter for label rendering.
 typedef DialFormatter = String Function(double value);
 
@@ -16,10 +18,20 @@ class CameraDialConfig {
   /// Optional label formatter. Falls back to [format]'s default when null.
   final DialFormatter? formatter;
 
+  /// Left (minimum) and right (maximum) icons for the slider ends.
+  final IconData leftIcon;
+  final IconData rightIcon;
+
+  /// Shared icon size for both ends (kept equal intentionally).
+  final double iconSize;
+
   const CameraDialConfig({
     required this.stops,
     this.majorTickEvery = 1,
     this.formatter,
+    this.leftIcon = Icons.remove,
+    this.rightIcon = Icons.add,
+    this.iconSize = 20,
   });
 
   // ── Named constructors ────────────────────────────────────────────────────
@@ -80,6 +92,9 @@ class CameraDialConfig {
       stops: stops.isEmpty ? [minIso, maxIso] : stops,
       majorTickEvery: 6,
       formatter: (v) => v.round().toString(),
+      leftIcon: Icons.brightness_5,
+      rightIcon: Icons.brightness_7,
+      iconSize: 20,
     );
   }
 
@@ -129,6 +144,9 @@ class CameraDialConfig {
         if (secs < 1.0) return '1/${(1.0 / secs).round()}';
         return '${secs.toStringAsFixed(1)}s';
       },
+      leftIcon: Icons.shutter_speed,
+      rightIcon: Icons.shutter_speed,
+      iconSize: 20,
     );
   }
 
@@ -156,6 +174,9 @@ class CameraDialConfig {
         if ((v - v.roundToDouble()).abs() < 0.05) return '${v.round()}×';
         return '${v.toStringAsFixed(1)}×';
       },
+      leftIcon: Icons.zoom_out,
+      rightIcon: Icons.zoom_in,
+      iconSize: 20,
     );
   }
 
@@ -187,6 +208,9 @@ class CameraDialConfig {
         if (metres >= 1.0) return '${metres.toStringAsFixed(1)}m';
         return '${(metres * 100).round()}cm';
       },
+      leftIcon: Icons.center_focus_weak,
+      rightIcon: Icons.center_focus_strong,
+      iconSize: 20,
     );
   }
 
