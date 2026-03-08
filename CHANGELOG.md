@@ -8,6 +8,7 @@
 - composed style classes + configurable haptics
 - Camera dial presets extracted from main.dart
 - Simplified dial presets API
+- Extracted the slider and wb action bar into its own widget library
 
 - Added `CameraDialStyle` in `camera_dial_config.dart` to control slider appearance/layout (tick spacing, total height, tick top, icon paddings, fade, tick/label/indicator visuals).
 - Replaced helper functions with simple per-dial objects in `camera_dial_presets.dart`: `IsoDialPreset`, `ShutterDialPreset`, `ZoomDialPreset`, `FocusDialPreset`, each exposing `toModel()`.

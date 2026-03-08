@@ -8,9 +8,8 @@ import 'app_theme.dart';
 import 'camera_control.dart';
 import 'widgets/bottom_info_bar.dart';
 import 'widgets/camera_settings_drawer.dart';
-import 'widgets/camera_ruler_slider/camera_dial_presets.dart';
-import 'widgets/camera_ruler_slider/camera_ruler_slider.dart';
 import 'widgets/canvas_view.dart';
+import 'widgets/floating_hover_slider.dart';
 import 'widgets/left_toolbar.dart';
 import 'widgets/mini_map.dart';
 
@@ -447,162 +446,31 @@ class _CameraScreenState extends State<CameraScreen> {
                       // Cap height so the panel can never grow tall enough to
                       // overlap with widgets pinned to the top of the screen.
                       height: 80,
-                      child: _buildHoverSlider(),
+                      child: FloatingHoverSlider(
+                        activeParam: _hoverParam,
+                        wbLocked: _wbLocked,
+                        isoRange: _isoRange,
+                        isoValue: _isoValue,
+                        onIsoChanged: _onIsoChanged,
+                        exposureTimeRangeNs: _exposureTimeRangeNs,
+                        exposureTimeNs: _exposureTimeNs,
+                        onExposureTimeNsChanged: _onExposureTimeNsChanged,
+                        minZoomRatio: _minZoomRatio,
+                        maxZoomRatio: _maxZoomRatio,
+                        currentZoomRatio: _currentZoomRatio,
+                        onZoomChanged: _onZoomChanged,
+                        minFocusDistance: _minFocusDistance,
+                        currentFocusDistance: _currentFocusDistance,
+                        onFocusChanged: _onFocusChanged,
+                        onLockWb: _lockWb,
+                        onUnlockWb: _unlockWb,
+                      ),
                     ),
 
                   // Resolution debug badge (top-left, subtle)
                   if (_cameraStarted)
                     Positioned(top: 8, left: 8, child: _buildResolutionBadge()),
                 ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Floating hover slider ─────────────────────────────────────────
-
-  /// Builds the floating [CameraRulerSlider] (or WB action panel) that hovers
-  /// above the camera preview when a floating-param chip is selected.
-  ///
-  /// The widget is positioned by the parent [Positioned] at `bottom: 100`,
-  /// sitting above the icon strip (52 px) + info bar (36 px) + gap (12 px).
-  Widget _buildHoverSlider() {
-    final activeParam = _hoverParam;
-    if (activeParam == null) return const SizedBox.shrink();
-    if (activeParam == CameraParam.wb) return _buildHoverWb();
-
-    final CameraDialModel model;
-    switch (activeParam) {
-      case CameraParam.iso:
-        model = IsoDialPreset(
-          isoRange: _isoRange,
-          isoValue: _isoValue,
-          onIsoChanged: _onIsoChanged,
-        ).toModel();
-        break;
-      case CameraParam.shutter:
-        model = ShutterDialPreset(
-          exposureTimeRangeNs: _exposureTimeRangeNs,
-          exposureTimeNs: _exposureTimeNs,
-          onExposureTimeNsChanged: _onExposureTimeNsChanged,
-        ).toModel();
-        break;
-      case CameraParam.zoom:
-        model = ZoomDialPreset(
-          minZoomRatio: _minZoomRatio,
-          maxZoomRatio: _maxZoomRatio,
-          currentZoomRatio: _currentZoomRatio,
-          onZoomChanged: _onZoomChanged,
-        ).toModel();
-        break;
-      case CameraParam.focus:
-        model = FocusDialPreset(
-          minFocusDistance: _minFocusDistance,
-          currentFocusDistance: _currentFocusDistance,
-          onFocusChanged: _onFocusChanged,
-        ).toModel();
-        break;
-      case CameraParam.wb:
-        return _buildHoverWb();
-    }
-
-    final config = model.config;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        // ClipRRect is the capsule clip boundary — no padding so ticks fill
-        // edge-to-edge and are smoothly cut by the curve.
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(100),
-          child: ColoredBox(
-            color: const Color(0xFF1A1A1A).withValues(alpha: 0.82),
-            child: CameraRulerSlider(
-              key: ValueKey(activeParam),
-              config: config,
-              initialValue: model.initialValue,
-              onChanged: model.onChanged,
-              fadeColor: Colors.black,
-              leftIcon: Icon(
-                config.leftIcon,
-                size: config.iconSize,
-                color: Colors.white.withValues(alpha: 0.5),
-              ),
-              rightIcon: Icon(
-                config.rightIcon,
-                size: config.iconSize,
-                color: Colors.white.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Floating WB panel — shown instead of a numeric slider since WB has no
-  /// user-adjustable scalar; it is either running auto or locked to a captured
-  /// colour-correction matrix.
-  Widget _buildHoverWb() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      decoration: BoxDecoration(
-        color: kPanelColor.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: kBorderColor),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _hoverWbButton(
-            label: 'Auto AWB',
-            icon: Icons.wb_auto,
-            isActive: !_wbLocked,
-            // onTap is null when this state is already active
-            onTap: _wbLocked ? _unlockWb : null,
-          ),
-          const SizedBox(width: 16),
-          _hoverWbButton(
-            label: 'Lock WB',
-            icon: Icons.lock,
-            isActive: _wbLocked,
-            onTap: !_wbLocked ? _lockWb : null,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// A single action button used in the floating WB panel.
-  Widget _hoverWbButton({
-    required String label,
-    required IconData icon,
-    required bool isActive,
-    VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        decoration: BoxDecoration(
-          color: isActive ? kAccent : kBorderColor,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: isActive ? Colors.white : kTextMuted),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: isActive ? Colors.white : kTextMuted,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
           ],
