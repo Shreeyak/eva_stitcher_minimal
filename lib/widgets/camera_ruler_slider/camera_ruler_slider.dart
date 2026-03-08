@@ -231,7 +231,11 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
           final innerDx = constraints.maxWidth / 2 - _visualIndex * tickSpacing;
           // Equivalent position in the local coordinate of the inner clip
           // (origin shifted right by _kIconPad).
-          final localDx = innerDx - _kIconPad;
+          // Pixel-align the render offset so ticks land on whole physical pixels
+          // — avoids sub-pixel anti-aliasing blur on vertical lines.
+          final dpr = MediaQuery.of(context).devicePixelRatio;
+          final localDx = (innerDx - _kIconPad);
+          final alignedDx = (localDx * dpr).roundToDouble() / dpr;
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -263,8 +267,9 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                           child: CustomPaint(
                             painter: _TicksPainter(
                               config: widget.config,
-                              rulerOffset: localDx,
+                              rulerOffset: alignedDx,
                               tickTop: _tickTop,
+                              dpr: dpr,
                             ),
                           ),
                         ),
@@ -275,7 +280,7 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                               painter: _LabelsPainter(
                                 visualIndex: _visualIndex,
                                 config: widget.config,
-                                rulerOffset: localDx,
+                                rulerOffset: alignedDx,
                                 tickTop: _tickTop,
                               ),
                             ),
@@ -338,12 +343,16 @@ class _TicksPainter extends CustomPainter {
   /// Y offset from widget top where ticks start (bottom of label area).
   final double tickTop;
 
+  /// Device pixel ratio — used to snap each tick's x to a whole physical pixel.
+  final double dpr;
+
   static const double tickSpacing = 18;
 
   const _TicksPainter({
     required this.config,
     required this.rulerOffset,
     required this.tickTop,
+    required this.dpr,
   });
 
   @override
@@ -369,7 +378,10 @@ class _TicksPainter extends CustomPainter {
     final paint = Paint()..strokeCap = StrokeCap.round;
 
     for (int i = iFirst; i <= iLast; i++) {
-      final double x = rulerOffset + i * tickSpacing;
+      final double rawX = rulerOffset + i * tickSpacing;
+      // Snap to the nearest whole physical pixel — eliminates sub-pixel
+      // anti-aliasing blur on vertical tick lines.
+      final double x = (rawX * dpr).roundToDouble() / dpr;
 
       final double edgeFade = _edgeFade(x, size.width);
       if (edgeFade <= 0) continue;
@@ -378,8 +390,9 @@ class _TicksPainter extends CustomPainter {
       final double tickH = isMajor ? 14.0 : 7.0;
       final double baseAlpha = isMajor ? 0.85 : 0.45;
 
+      // Integer stroke widths → whole physical pixel columns, no AA blur.
       paint
-        ..strokeWidth = isMajor ? 2.0 : 1.5
+        ..strokeWidth = isMajor ? 2.0 : 1.0
         ..color = tickBase.withValues(alpha: baseAlpha * edgeFade);
 
       canvas.drawLine(Offset(x, bottom), Offset(x, bottom - tickH), paint);
