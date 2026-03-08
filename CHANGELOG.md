@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-08 (update 22)
+
+### CameraRulerSlider: full file refactor
+
+- Moved all layout constants to file level (`_kTickSpacing`, `_kTotalHeight`, `_kTickTop`, `_kIconPad`, `_kFadeZone`); removed duplicate `tickSpacing` static consts from state and painter classes.
+- Renamed state fields to private (`_velocity`, `_lastDragTime`, `_inertiaTimer`); removed empty `didUpdateWidget` override; renamed drag/snap/inertia methods to `_updateDrag`, `_snapToNearest`, `_startInertia`, `_onDragEnd`.
+- Made `_TicksPainter` and `_LabelsPainter` constructors `const`; added `_LabelsPainter._makeLabel` and `._paint` as proper methods; reworked all inline comments to be short and purposeful.
+
 ## 2026-03-08 (update 21)
 
 ### CameraRulerSlider: Per-tick alpha fade in painter (replaces ShaderMask)

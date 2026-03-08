@@ -307,102 +307,6 @@ class _CameraScreenState extends State<CameraScreen> {
     CameraControl.setZoomRatio(ratio);
   }
 
-  List<double> _buildIsoStops() {
-    // 1/3-stop values with one geometric-mean intermediate between each pair
-    // → ~1/6-stop spacing. Full stops (50,100,...,6400) land at every 6th index
-    // so majorTickEvery=6 labels them as major ticks.
-    const all = <double>[
-      50,
-      57,
-      64,
-      72,
-      80,
-      90,
-      100,
-      112,
-      125,
-      141,
-      160,
-      179,
-      200,
-      224,
-      250,
-      283,
-      320,
-      358,
-      400,
-      447,
-      500,
-      566,
-      640,
-      716,
-      800,
-      894,
-      1000,
-      1118,
-      1250,
-      1414,
-      1600,
-      1789,
-      2000,
-      2236,
-      2500,
-      2828,
-      3200,
-      3578,
-      4000,
-      4472,
-      5000,
-      5657,
-      6400,
-    ];
-    final minIso = _isoRange[0].toDouble();
-    final maxIso = _isoRange[1].toDouble();
-    final filtered = all.where((v) => v >= minIso && v <= maxIso).toList();
-    if (filtered.isEmpty) return [minIso, maxIso];
-    return filtered;
-  }
-
-  List<double> _buildShutterStopsNs() {
-    // Standard 1/3-stop shutter speeds; filtered to device's reported range.
-    const shutterSeconds = <double>[
-      1 / 8000,
-      1 / 6400,
-      1 / 5000,
-      1 / 4000,
-      1 / 3200,
-      1 / 2500,
-      1 / 2000,
-      1 / 1600,
-      1 / 1250,
-      1 / 1000,
-      1 / 800,
-      1 / 640,
-      1 / 500,
-      1 / 400,
-      1 / 320,
-      1 / 250,
-      1 / 200,
-      1 / 160,
-      1 / 125,
-      1 / 100,
-      1 / 80,
-      1 / 60,
-      1 / 50,
-      1 / 40,
-      1 / 30,
-      1 / 25,
-      1 / 20,
-      1 / 15,
-    ];
-    final allNs = shutterSeconds.map((s) => s * 1e9).toList();
-    final minNs = _exposureTimeRangeNs[0].toDouble();
-    final maxNs = _exposureTimeRangeNs[1].toDouble();
-    final filtered = allNs.where((v) => v >= minNs && v <= maxNs).toList();
-    if (filtered.isEmpty) return [minNs, maxNs];
-    return filtered;
-  }
-
   // ── Scan / session ────────────────────────────────────────────────
 
   void _toggleScan() {
@@ -570,134 +474,41 @@ class _CameraScreenState extends State<CameraScreen> {
     if (p == null) return const SizedBox.shrink();
     if (p == CameraParam.wb) return _buildHoverWb();
 
-    // ── Ruler config per param ─────────────────────────────────────────────
-    //
-    // CameraDialConfig uses the same log/linear convention as DialConfig but
-    // is the config type expected by CameraRulerSlider (camera_slider/).
     final CameraDialConfig config;
     final double currentValue;
     final ValueChanged<double> onChanged;
 
     switch (p) {
       case CameraParam.iso:
-        final isoStops = _buildIsoStops();
-        config = CameraDialConfig(
-          stops: isoStops,
-          majorTickEvery: 6,
-          formatter: (v) => v.round().toString(),
+        config = CameraDialConfig.iso(
+          minIso: _isoRange[0].toDouble(),
+          maxIso: _isoRange[1].toDouble(),
         );
-        currentValue = isoStops.reduce(
-          (a, b) => (a - _isoValue).abs() < (b - _isoValue).abs() ? a : b,
-        );
+        currentValue = config.closestTo(_isoValue.toDouble());
         onChanged = (v) => _onIsoChanged(v.round());
         break;
 
       case CameraParam.shutter:
-        final shutterStops = _buildShutterStopsNs();
-        config = CameraDialConfig(
-          stops: shutterStops,
-          majorTickEvery: 3,
-          formatter: (v) {
-            final secs = v / 1e9;
-            if (secs < 1.0) {
-              final denom = (1.0 / secs).round();
-              return '1/$denom';
-            }
-            return '${secs.toStringAsFixed(1)}s';
-          },
+        config = CameraDialConfig.shutter(
+          minNs: _exposureTimeRangeNs[0].toDouble(),
+          maxNs: _exposureTimeRangeNs[1].toDouble(),
         );
-        currentValue = shutterStops.reduce(
-          (a, b) =>
-              (a - _exposureTimeNs).abs() < (b - _exposureTimeNs).abs() ? a : b,
-        );
+        currentValue = config.closestTo(_exposureTimeNs.toDouble());
         onChanged = (v) => _onExposureTimeNsChanged(v.round());
         break;
 
       case CameraParam.zoom:
-        // Integer-anchored stops: 1×, 2×, 3×... with 2 linear intermediates
-        // between each integer. majorTickEvery=3 → major ticks land exactly on
-        // integer zoom values. For max zoom 10: 28 stops = 504 px strip.
-        final double zoomMin = _minZoomRatio;
-        final double zoomMax = _maxZoomRatio > zoomMin + 0.05
-            ? _maxZoomRatio
-            : zoomMin + 1.0;
-        final int firstInt = zoomMin.ceil();
-        final int lastInt = zoomMax.floor();
-        final List<double> zoomStops = [];
-        // If device min isn't exactly an integer (e.g. 0.6×), prepend it.
-        if (zoomMin < firstInt - 0.02) zoomStops.add(zoomMin);
-        for (int z = firstInt; z <= lastInt; z++) {
-          zoomStops.add(z.toDouble());
-          if (z < lastInt) {
-            zoomStops.add(z + 0.5);
-          }
-        }
-        // If device max isn't exactly an integer (e.g. 9.8×), append it.
-        if (zoomMax > lastInt + 0.02) zoomStops.add(zoomMax);
-        if (zoomStops.length < 2) zoomStops.add(zoomMax);
-        config = CameraDialConfig(
-          stops: zoomStops,
-          majorTickEvery: 2,
-          formatter: (v) {
-            // Clean integer label at integer stops; one decimal otherwise.
-            if ((v - v.roundToDouble()).abs() < 0.05) return '${v.round()}×';
-            return '${v.toStringAsFixed(1)}×';
-          },
+        config = CameraDialConfig.zoom(
+          zoomMin: _minZoomRatio,
+          zoomMax: _maxZoomRatio,
         );
-        currentValue = zoomStops.reduce(
-          (a, b) =>
-              (a - _currentZoomRatio).abs() < (b - _currentZoomRatio).abs()
-              ? a
-              : b,
-        );
+        currentValue = config.closestTo(_currentZoomRatio);
         onChanged = (v) => _onZoomChanged(v);
         break;
 
       case CameraParam.focus:
-        // Anchor at perceptually-spaced diopter values; 2 linear intermediates
-        // between each anchor. majorTickEvery=3 → major ticks on anchors.
-        // Diopters: 0 = ∞, higher = closer. focusMax = device min focus dist.
-        final double focusMax = _minFocusDistance > 0.05
-            ? _minFocusDistance
-            : 10.0;
-        // Named diopter anchors — filter to [0, focusMax].
-        const anchorD = <double>[0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0];
-        final validAnchors = anchorD
-            .where((d) => d <= focusMax + 0.05)
-            .toList();
-        // Always include focusMax as the last anchor.
-        if ((validAnchors.last - focusMax).abs() > 0.05) {
-          validAnchors.add(focusMax);
-        }
-        // Build stops: anchor + 2 intermediates between consecutive anchors.
-        final List<double> focusStops = [];
-        for (int i = 0; i < validAnchors.length; i++) {
-          focusStops.add(validAnchors[i]);
-          if (i < validAnchors.length - 1) {
-            final a = validAnchors[i];
-            final b = validAnchors[i + 1];
-            focusStops.add(a + (b - a) / 3.0);
-            focusStops.add(a + (b - a) * 2.0 / 3.0);
-          }
-        }
-        config = CameraDialConfig(
-          stops: focusStops,
-          majorTickEvery: 3,
-          formatter: (v) {
-            if (v < 0.01) return '∞';
-            final metres = 1.0 / v;
-            if (metres >= 100) return '∞';
-            if (metres >= 1.0) return '${metres.toStringAsFixed(1)}m';
-            return '${(metres * 100).round()}cm';
-          },
-        );
-        currentValue = focusStops.reduce(
-          (a, b) =>
-              (a - _currentFocusDistance.clamp(0.0, focusMax)).abs() <
-                  (b - _currentFocusDistance.clamp(0.0, focusMax)).abs()
-              ? a
-              : b,
-        );
+        config = CameraDialConfig.focus(maxDiopter: _minFocusDistance);
+        currentValue = config.closestTo(_currentFocusDistance);
         onChanged = (v) => _onFocusChanged(v);
         break;
 

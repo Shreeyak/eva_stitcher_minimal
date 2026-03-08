@@ -1,31 +1,7 @@
-/// A production-style camera ruler dial with:
-/// - center-locked indicator
-/// - infinite scroll illusion
-/// - optional min/max clamp
-/// - velocity fling inertia
-/// - magnetic tick snapping
-/// - haptic feedback
-/// - edge fading + tick glow
-/// - logarithmic value mapping support
-/// - GPU-cheap painter
+/// Horizontal camera ruler slider — ISO / shutter / zoom / focus style.
 ///
-/// Usage:
-/// ```dart
-/// import 'widgets/camera_slider/camera_ruler_slider.dart';
-/// import 'widgets/camera_slider/camera_dial_config.dart';
-///
-/// CameraRulerSlider(
-///   config: CameraDialConfig(
-///     min: 1,
-///     max: 10,
-///     ticks: 120,
-///     logarithmic: true,
-///     clamp: false,
-///   ),
-///   initialValue: 1,
-///   onChanged: (zoom) {},
-/// )
-/// ```
+/// Features: tick snapping, haptic feedback, edge fade, optional inertia,
+/// logarithmic value mapping, end icons.
 library;
 
 import 'dart:async';
@@ -35,11 +11,30 @@ import 'package:flutter/services.dart';
 
 import 'camera_dial_config.dart';
 
-/// Width (px) of the fade zone on each edge of the inner ruler viewport.
-/// Used by both _TicksPainter and _LabelsPainter for consistent edge fading.
+// ── Layout constants ──────────────────────────────────────────────────────────
+
+/// Spacing between adjacent tick marks in logical pixels.
+const double _kTickSpacing = 18.0;
+
+/// Total widget height — gesture-sensitive area.
+const double _kTotalHeight = 44.0;
+
+/// Y offset from widget top where the tick strip begins.
+/// The label area lives above this line.
+const double _kTickTop = 24.0;
+
+/// Horizontal padding reserved on each side for end icons.
+/// Ticks and labels are clipped to [_kIconPad, width − _kIconPad].
+const double _kIconPad = 52.0;
+
+/// Width of the fade zone on each edge of the inner viewport.
 const double _kFadeZone = 60.0;
 
-/// Smoothstep fade: 0 at the viewport edge, 1 at _kFadeZone inward.
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/// Smoothstep alpha: 1 in the centre, 0 at the viewport edge.
+/// Applied per-tick rather than via ShaderMask so fading is correct at
+/// min/max scroll positions (ShaderMask bounds shift with scrolling content).
 double _edgeFade(double x, double viewportWidth) {
   double t = 1.0;
   if (x < _kFadeZone) t = (x / _kFadeZone).clamp(0.0, 1.0);
@@ -49,26 +44,23 @@ double _edgeFade(double x, double viewportWidth) {
   return t * t * (3.0 - 2.0 * t);
 }
 
-/// Camera ruler slider
-///
-/// Designed for ISO / shutter style camera controls.
-/// Uses cached tick strip for high performance.
+// ── Widget ────────────────────────────────────────────────────────────────────
+
+/// Horizontal ruler slider styled after iOS camera controls.
 class CameraRulerSlider extends StatefulWidget {
   final CameraDialConfig config;
   final double initialValue;
   final ValueChanged<double> onChanged;
 
-  /// Whether fling inertia is active after drag release. Defaults to false.
+  /// Enables fling inertia after drag release.
   final bool enableInertia;
 
-  /// Color the edge-fade gradient blends into.
-  /// Set this to match the container background so the fade looks seamless.
+  // fadeColor is kept for API compatibility but not used in rendering —
+  // fading is handled per-tick in _TicksPainter.
   final Color fadeColor;
 
-  /// Optional icon shown at the left (min) end of the slider.
+  /// Icons shown at the left (min) and right (max) ends.
   final Widget? leftIcon;
-
-  /// Optional icon shown at the right (max) end of the slider.
   final Widget? rightIcon;
 
   const CameraRulerSlider({
@@ -87,34 +79,17 @@ class CameraRulerSlider extends StatefulWidget {
 }
 
 class _CameraRulerSliderState extends State<CameraRulerSlider> {
-  /// Float 0..1 position — fractional during drag, snapped to a stop at rest.
+  /// Scroll position as 0..1 fraction. Fractional during drag, snapped at rest.
   double _visualPercent = 0;
 
-  /// velocity in pixels/sec for inertia
-  double velocity = 0;
+  double _velocity = 0;
+  DateTime? _lastDragTime;
+  Timer? _inertiaTimer;
 
-  DateTime? lastTime;
-
-  Timer? inertiaTimer;
-
-  /// Last tick index the indicator passed through — used for haptic + live onChanged.
+  /// Last snapped tick index — used to fire haptic + onChanged exactly once per
+  /// tick boundary crossed, not once per pixel.
   int _lastTickIndex = 0;
 
-  static const double tickSpacing = 18;
-
-  /// Total widget height (gesture-sensitive area).
-  static const double _totalHeight = 44;
-
-  /// Y-offset from widget top where the tick strip begins.
-  /// The label area lives above this.
-  static const double _tickTop = 24;
-
-  /// Horizontal padding reserved for the end icons on each side.
-  /// Sized ~= total widget height (44 px) + a little breathing room.
-  /// Ticks and labels are clipped to the inner [_kIconPad, width-_kIconPad] zone.
-  static const double _kIconPad = 52.0;
-
-  /// Fractional index — smooth during drag, integer-aligned at rest.
   double get _visualIndex => _visualPercent * (widget.config.stopCount - 1);
 
   @override
@@ -129,130 +104,109 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
     _lastTickIndex = clampedIdx.toInt();
   }
 
-  @override
-  void didUpdateWidget(CameraRulerSlider oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Config changes are handled by _TicksPainter.shouldRepaint
+  // ── Drag ───────────────────────────────────────────────────────────────────
+
+  void _updateDrag(double delta) {
+    final pxPerPercent = 1.0 / ((widget.config.stopCount - 1) * _kTickSpacing);
+    final newPercent = (_visualPercent - delta * pxPerPercent).clamp(0.0, 1.0);
+    _crossTick(newPercent);
+    setState(() => _visualPercent = newPercent);
   }
 
-  // Move smoothly as a float — no snapping during drag.
-  // Fires haptic + onChanged each time the indicator crosses a tick boundary.
-  void updateDrag(double delta) {
-    final percentPerPixel = 1.0 / ((widget.config.stopCount - 1) * tickSpacing);
-    final newPercent = (_visualPercent - delta * percentPerPixel).clamp(
-      0.0,
-      1.0,
-    );
-    _checkTickCrossing(newPercent);
-    setState(() {
-      _visualPercent = newPercent;
-    });
-  }
-
-  /// Fires haptic feedback and onChanged exactly once per tick boundary crossed.
-  void _checkTickCrossing(double newPercent) {
-    final newIndex = (newPercent * (widget.config.stopCount - 1)).round().clamp(
+  /// Fires haptic + onChanged once each time the indicator crosses a tick.
+  void _crossTick(double newPercent) {
+    final idx = (newPercent * (widget.config.stopCount - 1)).round().clamp(
       0,
       widget.config.stopCount - 1,
     );
-    if (newIndex != _lastTickIndex) {
-      _lastTickIndex = newIndex;
+    if (idx != _lastTickIndex) {
+      _lastTickIndex = idx;
       HapticFeedback.heavyImpact();
-      widget.onChanged(widget.config.stops[newIndex]);
+      widget.onChanged(widget.config.stops[idx]);
     }
   }
 
-  // Snap in the direction of movement using velocity (temporally smoothed, not
-  // susceptible to end-of-gesture jitter). Right drag (velocity > 0) → snap up;
-  // left drag (velocity < 0) → snap down.
-  void _snapNow() {
-    // Always snap to the nearest tick — velocity-direction snapping causes
-    // jitter on small movements because finger-lift velocity is noisy.
-    // onChanged already fires live via _checkTickCrossing; this just confirms
-    // the final resting position.
-    final index = (_visualPercent * (widget.config.stopCount - 1))
-        .round()
-        .clamp(0, widget.config.stopCount - 1);
-    _visualPercent = widget.config.indexToPercent(index);
-    widget.onChanged(widget.config.stops[index]);
-  }
-
-  /// Track drag velocity
-  void trackVelocity(double delta) {
+  void _trackVelocity(double delta) {
     final now = DateTime.now();
-    if (lastTime != null) {
-      final dt = now.difference(lastTime!).inMilliseconds / 1000;
-      if (dt > 0) velocity = delta / dt;
+    if (_lastDragTime != null) {
+      final dt = now.difference(_lastDragTime!).inMilliseconds / 1000;
+      if (dt > 0) _velocity = delta / dt;
     }
-    lastTime = now;
+    _lastDragTime = now;
   }
 
-  /// Inertial scroll after drag release; snap to nearest stop when coasting ends.
-  void startInertia() {
+  void _onDragEnd() {
+    if (widget.enableInertia && _velocity.abs() >= 0.5) {
+      _startInertia();
+    } else {
+      setState(_snapToNearest);
+    }
+  }
+
+  // ── Snap ───────────────────────────────────────────────────────────────────
+
+  /// Snaps to nearest tick. Always nearest — velocity-direction snapping is
+  /// unreliable because finger-lift velocity is noisy.
+  void _snapToNearest() {
+    final idx = (_visualPercent * (widget.config.stopCount - 1)).round().clamp(
+      0,
+      widget.config.stopCount - 1,
+    );
+    _visualPercent = widget.config.indexToPercent(idx);
+    widget.onChanged(widget.config.stops[idx]);
+  }
+
+  // ── Inertia ────────────────────────────────────────────────────────────────
+
+  void _startInertia() {
     const friction = 0.88;
-    inertiaTimer?.cancel();
-    inertiaTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
-      velocity *= friction;
-      if (velocity.abs() < 0.5) {
-        inertiaTimer?.cancel();
-        setState(_snapNow);
+    _inertiaTimer?.cancel();
+    _inertiaTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+      _velocity *= friction;
+      if (_velocity.abs() < 0.5) {
+        _inertiaTimer?.cancel();
+        setState(_snapToNearest);
         return;
       }
-      updateDrag(velocity * 0.016);
+      _updateDrag(_velocity * 0.016);
     });
-  }
-
-  /// Snap immediately on finger lift; start inertia only if enabled and velocity is high.
-  void onDragEnd() {
-    if (widget.enableInertia && velocity.abs() >= 0.5) {
-      startInertia();
-    } else {
-      setState(_snapNow);
-    }
   }
 
   @override
   void dispose() {
-    inertiaTimer?.cancel();
+    _inertiaTimer?.cancel();
     super.dispose();
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    // _totalHeight is the full gesture-sensitive area.
-    // Tick strip (_cacheHeight) is positioned at _tickTop from the top,
-    // leaving the label area above and a small pad below.
     return SizedBox(
-      height: _totalHeight,
+      height: _kTotalHeight,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // Ruler center is the center of the inner (non-icon) area.
-          // Since inner zone is symmetric, the center equals maxWidth/2.
-          final innerDx = constraints.maxWidth / 2 - _visualIndex * tickSpacing;
-          // Equivalent position in the local coordinate of the inner clip
-          // (origin shifted right by _kIconPad).
-          // Pixel-align the render offset so ticks land on whole physical pixels
-          // — avoids sub-pixel anti-aliasing blur on vertical lines.
+          // Tick index 0 position in inner-zone local coordinates.
+          // Pixel-aligned so each tick falls on a whole physical pixel —
+          // prevents sub-pixel AA blur on vertical lines.
           final dpr = MediaQuery.of(context).devicePixelRatio;
-          final localDx = (innerDx - _kIconPad);
-          final alignedDx = (localDx * dpr).roundToDouble() / dpr;
+          final rawOffset =
+              constraints.maxWidth / 2 -
+              _visualIndex * _kTickSpacing -
+              _kIconPad;
+          final rulerOffset = (rawOffset * dpr).roundToDouble() / dpr;
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
             onHorizontalDragUpdate: (d) {
-              if (widget.enableInertia) trackVelocity(d.delta.dx);
-              updateDrag(d.delta.dx);
+              if (widget.enableInertia) _trackVelocity(d.delta.dx);
+              _updateDrag(d.delta.dx);
             },
-            onHorizontalDragEnd: (_) => onDragEnd(),
+            onHorizontalDragEnd: (_) => _onDragEnd(),
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // ── Inner ruler zone (ticks + labels) ────────────────────
-                // Clipped to [_kIconPad, width-_kIconPad] so ticks never
-                // render under the end icons.
-                // _TicksPainter draws only visible ticks and fades each tick
-                // based on its distance from the viewport edges — no ShaderMask
-                // needed, and fading is always correct at min/max positions.
+                // Ruler zone — clipped so ticks never render over end icons.
                 Positioned(
                   left: _kIconPad,
                   right: _kIconPad,
@@ -262,26 +216,22 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        // Ticks — viewport-edge fade built into painter.
                         Positioned.fill(
                           child: CustomPaint(
                             painter: _TicksPainter(
                               config: widget.config,
-                              rulerOffset: alignedDx,
-                              tickTop: _tickTop,
+                              rulerOffset: rulerOffset,
                               dpr: dpr,
                             ),
                           ),
                         ),
-                        // Labels — same local coordinate space.
                         Positioned.fill(
                           child: IgnorePointer(
                             child: CustomPaint(
                               painter: _LabelsPainter(
-                                visualIndex: _visualIndex,
                                 config: widget.config,
-                                rulerOffset: alignedDx,
-                                tickTop: _tickTop,
+                                visualIndex: _visualIndex,
+                                rulerOffset: rulerOffset,
                               ),
                             ),
                           ),
@@ -291,9 +241,7 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                   ),
                 ),
 
-                // ── Center indicator (capsule) ────────────────────────────
-                // bottom:2 pins capsule ~2px lower than tick baseline,
-                // creating a small gap below the label area.
+                // Centre indicator — bottom: 3 creates a small gap beneath ticks.
                 Positioned(
                   top: 0,
                   bottom: 3,
@@ -305,7 +253,6 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                   ),
                 ),
 
-                // ── End icons ────────────────────────────────────────────
                 if (widget.leftIcon != null)
                   Positioned(
                     left: 12,
@@ -329,29 +276,24 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   }
 }
 
-/// Tick strip painter.
-///
-/// Draws only the ticks that fall within the current viewport, with per-tick
-/// alpha computed from the tick's distance from the left/right viewport edges.
-/// This produces a correct soft fade at all scroll positions including min/max.
+// ── Painters ──────────────────────────────────────────────────────────────────
+
+/// Draws tick marks for all stops visible in the current viewport.
+/// Per-tick alpha fade via [_edgeFade] keeps fading correct at min/max positions.
 class _TicksPainter extends CustomPainter {
   final CameraDialConfig config;
 
-  /// X position of tick index 0 in the local clip-zone coordinate space.
+  /// X position of tick index 0 in the inner-zone local coordinate space.
   final double rulerOffset;
 
-  /// Y offset from widget top where ticks start (bottom of label area).
-  final double tickTop;
-
-  /// Device pixel ratio — used to snap each tick's x to a whole physical pixel.
+  /// Device pixel ratio — snaps each tick x to a whole physical pixel.
   final double dpr;
 
-  static const double tickSpacing = 18;
+  static const Color _tickColor = Color(0xFFD4847A);
 
   const _TicksPainter({
     required this.config,
     required this.rulerOffset,
-    required this.tickTop,
     required this.dpr,
   });
 
@@ -360,55 +302,49 @@ class _TicksPainter extends CustomPainter {
     final n = config.stopCount;
     if (n < 2) return;
 
-    const Color tickBase = Color(0xFFD4847A);
-    // Ticks bottom at tickTop + 16 — matches the old cacheHeight positioning.
-    // Painting to size.height (44) would clip against the ClipRect edge.
-    final double bottom = tickTop + 16.0;
+    // Tick strip bottom at _kTickTop + 16. Painting to size.height would clip
+    // against the outer ClipRect at the widget's bottom edge.
+    const double bottom = _kTickTop + 16.0;
 
-    // Only iterate ticks that could be visible on screen.
-    // First possibly visible: x = rulerOffset + i*tickSpacing >= -tickSpacing
-    final int iFirst = ((-tickSpacing - rulerOffset) / tickSpacing)
+    final int iFirst = ((-_kTickSpacing - rulerOffset) / _kTickSpacing)
         .floor()
         .clamp(0, n - 1);
-    // Last possibly visible: x <= size.width + tickSpacing
-    final int iLast = ((size.width + tickSpacing - rulerOffset) / tickSpacing)
-        .ceil()
-        .clamp(0, n - 1);
+    final int iLast =
+        ((size.width + _kTickSpacing - rulerOffset) / _kTickSpacing)
+            .ceil()
+            .clamp(0, n - 1);
 
     final paint = Paint()..strokeCap = StrokeCap.round;
 
     for (int i = iFirst; i <= iLast; i++) {
-      final double rawX = rulerOffset + i * tickSpacing;
-      // Snap to the nearest whole physical pixel — eliminates sub-pixel
-      // anti-aliasing blur on vertical tick lines.
-      final double x = (rawX * dpr).roundToDouble() / dpr;
+      // Snap to whole physical pixel — integer columns, no AA blur.
+      final double x =
+          ((rulerOffset + i * _kTickSpacing) * dpr).roundToDouble() / dpr;
 
-      final double edgeFade = _edgeFade(x, size.width);
-      if (edgeFade <= 0) continue;
+      final double fade = _edgeFade(x, size.width);
+      if (fade <= 0) continue;
 
       final bool isMajor = i % config.majorTickEvery == 0;
-      final double tickH = isMajor ? 14.0 : 7.0;
-      final double baseAlpha = isMajor ? 0.85 : 0.45;
-
-      // Integer stroke widths → whole physical pixel columns, no AA blur.
       paint
         ..strokeWidth = isMajor ? 2.0 : 1.0
-        ..color = tickBase.withValues(alpha: baseAlpha * edgeFade);
+        ..color = _tickColor.withValues(alpha: (isMajor ? 0.85 : 0.45) * fade);
 
-      canvas.drawLine(Offset(x, bottom), Offset(x, bottom - tickH), paint);
+      canvas.drawLine(
+        Offset(x, bottom),
+        Offset(x, bottom - (isMajor ? 14.0 : 7.0)),
+        paint,
+      );
     }
   }
 
   @override
-  bool shouldRepaint(covariant _TicksPainter oldDelegate) {
-    return oldDelegate.config.stopCount != config.stopCount ||
-        oldDelegate.config.majorTickEvery != config.majorTickEvery ||
-        oldDelegate.rulerOffset != rulerOffset;
-  }
+  bool shouldRepaint(covariant _TicksPainter old) =>
+      old.rulerOffset != rulerOffset ||
+      old.config.stopCount != config.stopCount ||
+      old.config.majorTickEvery != config.majorTickEvery;
 }
 
-/// Center indicator — a rounded capsule pill, taller than the major ticks so
-/// it visibly protrudes above them. Thicker width makes it immediately obvious.
+/// Capsule indicator anchored at the ruler's centre — marks the current value.
 class _Indicator extends StatelessWidget {
   const _Indicator();
 
@@ -425,126 +361,101 @@ class _Indicator extends StatelessWidget {
   }
 }
 
-/// Labels-only painter — lightweight, no image ops.
-/// Shows: large bold value at center indicator, small faint labels only for
-/// nearby major ticks. Minor ticks are not labelled.
+/// Draws the centre value label (large, bold) and up to 2 neighbouring major
+/// tick labels on each side. Labels share the same edge fade as _TicksPainter.
 class _LabelsPainter extends CustomPainter {
-  final double visualIndex;
   final CameraDialConfig config;
-  double rulerOffset;
+  final double visualIndex;
+  final double rulerOffset;
 
-  /// Y-offset from widget top where the tick strip begins.
-  /// Labels are drawn just above this line.
-  final double tickTop;
+  // -6 px baseline offset so tall bold glyphs don't clip against the top
+  // of the inner ClipRect.
+  static const double _baselineOffset = -6.0;
+  static const double _minGap = 18.0;
+  static const int _maxPerSide = 2;
 
-  static const double tickSpacing = 18;
-
-  _LabelsPainter({
-    required this.visualIndex,
+  const _LabelsPainter({
     required this.config,
+    required this.visualIndex,
     required this.rulerOffset,
-    required this.tickTop,
   });
+
+  TextPainter _makeLabel(
+    int idx,
+    double x,
+    double viewportWidth, {
+    required bool isCenter,
+  }) {
+    final double fade = _edgeFade(x, viewportWidth);
+    return TextPainter(
+      text: TextSpan(
+        text: config.format(config.stops[idx]),
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: isCenter ? fade : 0.45 * fade),
+          fontSize: isCenter ? 18.0 : 10.0,
+          fontWeight: isCenter ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+  }
+
+  void _paint(Canvas canvas, TextPainter tp, double x) {
+    tp.paint(
+      canvas,
+      Offset(x - tp.width / 2, _kTickTop + _baselineOffset - tp.height),
+    );
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
     final int step = config.majorTickEvery;
     final int centerIdx = visualIndex.round().clamp(0, config.stopCount - 1);
-    final double centerX = rulerOffset + visualIndex * tickSpacing;
+    final double centerX = rulerOffset + visualIndex * _kTickSpacing;
 
-    // Labels sit just above the tick strip.
-    // labelBaselineY offsets the label bottom from tickTop.
-    // Keep at -2 so the top of tall glyphs (18px bold ~22px rendered) just touches
-    // y=0 without being clipped by the inner ClipRect.
-    const double labelBaselineY = -6.0;
+    // Centre label — always rendered.
+    final center = _makeLabel(centerIdx, centerX, size.width, isCenter: true);
+    _paint(canvas, center, centerX);
+    double rightBound = centerX + center.width / 2;
+    double leftBound = centerX - center.width / 2;
 
-    // Minimum pixel gap between the edge of one label and the start of the next.
-    const double minGap = 18.0;
-
-    // Maximum side labels shown per direction.
-    const int maxPerSide = 2;
-
-    // ── Helper: build and paint a label with viewport-edge fade ──────────
-    TextPainter _makePainter(
-      int idx, {
-      required bool isCenter,
-      required double x,
-    }) {
-      final double fade = _edgeFade(x, size.width);
-      return TextPainter(
-        text: TextSpan(
-          text: config.format(config.stops[idx]),
-          style: TextStyle(
-            color: isCenter
-                ? Colors.white.withValues(alpha: fade)
-                : Colors.white.withValues(alpha: 0.45 * fade),
-            fontSize: isCenter ? 18.0 : 10.0,
-            fontWeight: isCenter ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-    }
-
-    void _paintAt(TextPainter tp, double x) {
-      final double y = tickTop + labelBaselineY - tp.height;
-      tp.paint(canvas, Offset(x - tp.width / 2, y));
-    }
-
-    // ── 1. Center label (always rendered) ────────────────────────────────
-    final centerPainter = _makePainter(centerIdx, isCenter: true, x: centerX);
-    _paintAt(centerPainter, centerX);
-
-    // Right edge of center label in canvas coords (used as clearance boundary).
-    double rightBoundary = centerX + centerPainter.width / 2;
-    // Left edge of center label.
-    double leftBoundary = centerX - centerPainter.width / 2;
-
-    // ── 2. Walk right: nearest major tick(s) to the right of center ──────
-    {
-      // Start from the first major tick strictly to the right of centerIdx.
-      final int firstRight = ((visualIndex / step).ceil() * step);
-      int drawn = 0;
-      for (
-        int i = firstRight;
-        i < config.stopCount && drawn < maxPerSide;
-        i += step
-      ) {
-        final double x = rulerOffset + i * tickSpacing;
-        if (x > size.width + 60) break; // off-screen right
-        final tp = _makePainter(i, isCenter: false, x: x);
-        final double leftEdge = x - tp.width / 2;
-        if (leftEdge - rightBoundary >= minGap) {
-          _paintAt(tp, x);
-          rightBoundary = x + tp.width / 2;
-          drawn++;
-        }
+    // Walk right — up to _maxPerSide labels.
+    int drawnR = 0;
+    for (
+      int i = ((visualIndex / step).ceil() * step);
+      i < config.stopCount && drawnR < _maxPerSide;
+      i += step
+    ) {
+      final double x = rulerOffset + i * _kTickSpacing;
+      if (x > size.width + 60) break;
+      final tp = _makeLabel(i, x, size.width, isCenter: false);
+      if (x - tp.width / 2 - rightBound >= _minGap) {
+        _paint(canvas, tp, x);
+        rightBound = x + tp.width / 2;
+        drawnR++;
       }
     }
 
-    // ── 3. Walk left: nearest major tick(s) to the left of center ────────
-    {
-      final int firstLeft = ((visualIndex / step).floor() * step);
-      int drawn = 0;
-      for (int i = firstLeft; i >= 0 && drawn < maxPerSide; i -= step) {
-        final double x = rulerOffset + i * tickSpacing;
-        if (x < -60) break; // off-screen left
-        // Skip the exact center tick — already drawn.
-        if (i == centerIdx) continue;
-        final tp = _makePainter(i, isCenter: false, x: x);
-        final double rightEdge = x + tp.width / 2;
-        if (leftBoundary - rightEdge >= minGap) {
-          _paintAt(tp, x);
-          leftBoundary = x - tp.width / 2;
-          drawn++;
-        }
+    // Walk left — up to _maxPerSide labels.
+    int drawnL = 0;
+    for (
+      int i = ((visualIndex / step).floor() * step);
+      i >= 0 && drawnL < _maxPerSide;
+      i -= step
+    ) {
+      if (i == centerIdx) continue;
+      final double x = rulerOffset + i * _kTickSpacing;
+      if (x < -60) break;
+      final tp = _makeLabel(i, x, size.width, isCenter: false);
+      if (leftBound - (x + tp.width / 2) >= _minGap) {
+        _paint(canvas, tp, x);
+        leftBound = x - tp.width / 2;
+        drawnL++;
       }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _LabelsPainter oldDelegate) {
-    return oldDelegate.visualIndex != visualIndex ||
-        oldDelegate.rulerOffset != rulerOffset;
-  }
+  bool shouldRepaint(covariant _LabelsPainter old) =>
+      old.visualIndex != visualIndex || old.rulerOffset != rulerOffset;
 }
