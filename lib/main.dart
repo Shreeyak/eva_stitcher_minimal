@@ -8,7 +8,7 @@ import 'app_theme.dart';
 import 'camera_control.dart';
 import 'widgets/bottom_info_bar.dart';
 import 'widgets/camera_settings_drawer.dart';
-import 'widgets/camera_ruler_slider/camera_dial_config.dart';
+import 'widgets/camera_ruler_slider/camera_dial_presets.dart';
 import 'widgets/camera_ruler_slider/camera_ruler_slider.dart';
 import 'widgets/canvas_view.dart';
 import 'widgets/left_toolbar.dart';
@@ -474,48 +474,42 @@ class _CameraScreenState extends State<CameraScreen> {
     if (activeParam == null) return const SizedBox.shrink();
     if (activeParam == CameraParam.wb) return _buildHoverWb();
 
-    final CameraDialConfig config;
-    final double currentValue;
-    final ValueChanged<double> onChanged;
-
+    final CameraDialModel model;
     switch (activeParam) {
       case CameraParam.iso:
-        config = CameraDialConfig.iso(
-          minIso: _isoRange[0].toDouble(),
-          maxIso: _isoRange[1].toDouble(),
-        );
-        currentValue = config.closestTo(_isoValue.toDouble());
-        onChanged = (v) => _onIsoChanged(v.round());
+        model = IsoDialPreset(
+          isoRange: _isoRange,
+          isoValue: _isoValue,
+          onIsoChanged: _onIsoChanged,
+        ).toModel();
         break;
-
       case CameraParam.shutter:
-        config = CameraDialConfig.shutter(
-          minNs: _exposureTimeRangeNs[0].toDouble(),
-          maxNs: _exposureTimeRangeNs[1].toDouble(),
-        );
-        currentValue = config.closestTo(_exposureTimeNs.toDouble());
-        onChanged = (v) => _onExposureTimeNsChanged(v.round());
+        model = ShutterDialPreset(
+          exposureTimeRangeNs: _exposureTimeRangeNs,
+          exposureTimeNs: _exposureTimeNs,
+          onExposureTimeNsChanged: _onExposureTimeNsChanged,
+        ).toModel();
         break;
-
       case CameraParam.zoom:
-        config = CameraDialConfig.zoom(
-          zoomMin: _minZoomRatio,
-          zoomMax: _maxZoomRatio,
-        );
-        currentValue = config.closestTo(_currentZoomRatio);
-        onChanged = (v) => _onZoomChanged(v);
+        model = ZoomDialPreset(
+          minZoomRatio: _minZoomRatio,
+          maxZoomRatio: _maxZoomRatio,
+          currentZoomRatio: _currentZoomRatio,
+          onZoomChanged: _onZoomChanged,
+        ).toModel();
         break;
-
       case CameraParam.focus:
-        config = CameraDialConfig.focus(maxDiopter: _minFocusDistance);
-        currentValue = config.closestTo(_currentFocusDistance);
-        onChanged = (v) => _onFocusChanged(v);
+        model = FocusDialPreset(
+          minFocusDistance: _minFocusDistance,
+          currentFocusDistance: _currentFocusDistance,
+          onFocusChanged: _onFocusChanged,
+        ).toModel();
         break;
-
-      default:
-        return const SizedBox.shrink();
+      case CameraParam.wb:
+        return _buildHoverWb();
     }
 
+    final config = model.config;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 400),
@@ -528,8 +522,8 @@ class _CameraScreenState extends State<CameraScreen> {
             child: CameraRulerSlider(
               key: ValueKey(activeParam),
               config: config,
-              initialValue: currentValue,
-              onChanged: onChanged,
+              initialValue: model.initialValue,
+              onChanged: model.onChanged,
               fadeColor: Colors.black,
               leftIcon: Icon(
                 config.leftIcon,

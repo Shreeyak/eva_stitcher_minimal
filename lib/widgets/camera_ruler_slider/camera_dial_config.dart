@@ -3,11 +3,142 @@ import 'package:flutter/material.dart';
 /// Formatter for label rendering.
 typedef DialFormatter = String Function(double value);
 
+/// Visual and layout style for [CameraRulerSlider].
+///
+/// Keep value/stop math in [CameraDialConfig], and appearance knobs here so
+/// apps can tune one place for slider look-and-feel.
+@immutable
+class CameraDialStyle {
+  final CameraDialLayoutStyle layout;
+  final CameraDialFadeStyle fade;
+  final CameraDialTickStyle ticks;
+  final CameraDialLabelStyle labels;
+  final CameraDialIndicatorStyle indicator;
+
+  const CameraDialStyle({
+    this.layout = const CameraDialLayoutStyle(),
+    this.fade = const CameraDialFadeStyle(),
+    this.ticks = const CameraDialTickStyle(),
+    this.labels = const CameraDialLabelStyle(),
+    this.indicator = const CameraDialIndicatorStyle(),
+  });
+
+  CameraDialStyle copyWith({
+    CameraDialLayoutStyle? layout,
+    CameraDialFadeStyle? fade,
+    CameraDialTickStyle? ticks,
+    CameraDialLabelStyle? labels,
+    CameraDialIndicatorStyle? indicator,
+  }) {
+    return CameraDialStyle(
+      layout: layout ?? this.layout,
+      fade: fade ?? this.fade,
+      ticks: ticks ?? this.ticks,
+      labels: labels ?? this.labels,
+      indicator: indicator ?? this.indicator,
+    );
+  }
+}
+
+@immutable
+class CameraDialLayoutStyle {
+  final double tickSpacing;
+  final double totalHeight;
+  final double tickTop;
+  final double iconPad;
+  final double iconInset;
+
+  const CameraDialLayoutStyle({
+    this.tickSpacing = 18.0,
+    this.totalHeight = 44.0,
+    this.tickTop = 24.0,
+    this.iconPad = 44.0,
+    this.iconInset = 12.0,
+  });
+}
+
+@immutable
+class CameraDialFadeStyle {
+  final double fadeZoneFraction;
+  final double fadeZoneMinPx;
+  final double fadeZoneMaxPx;
+  final double minFadeValue;
+
+  const CameraDialFadeStyle({
+    this.fadeZoneFraction = 0.22,
+    this.fadeZoneMinPx = 20.0,
+    this.fadeZoneMaxPx = 90.0,
+    this.minFadeValue = 0.3,
+  });
+}
+
+@immutable
+class CameraDialTickStyle {
+  final Color color;
+  final double majorWidth;
+  final double minorWidth;
+  final double majorHeight;
+  final double minorHeight;
+  final double majorOpacity;
+  final double minorOpacity;
+
+  const CameraDialTickStyle({
+    this.color = const Color(0xFFD4847A),
+    this.majorWidth = 2.0,
+    this.minorWidth = 1.0,
+    this.majorHeight = 14.0,
+    this.minorHeight = 7.0,
+    this.majorOpacity = 0.85,
+    this.minorOpacity = 0.45,
+  });
+}
+
+@immutable
+class CameraDialLabelStyle {
+  final double centerFontSize;
+  final double sideFontSize;
+  final FontWeight centerFontWeight;
+  final FontWeight sideFontWeight;
+  final double sideOpacity;
+  final double baselineOffset;
+  final double minGap;
+  final int maxPerSide;
+  final double cullMargin;
+
+  const CameraDialLabelStyle({
+    this.centerFontSize = 18.0,
+    this.sideFontSize = 10.0,
+    this.centerFontWeight = FontWeight.w600,
+    this.sideFontWeight = FontWeight.normal,
+    this.sideOpacity = 0.45,
+    this.baselineOffset = -6.0,
+    this.minGap = 18.0,
+    this.maxPerSide = 2,
+    this.cullMargin = 60.0,
+  });
+}
+
+@immutable
+class CameraDialIndicatorStyle {
+  final double width;
+  final double height;
+  final Color color;
+  final double bottomInset;
+
+  const CameraDialIndicatorStyle({
+    this.width = 6.0,
+    this.height = 20.0,
+    this.color = const Color(0xFFED9478),
+    this.bottomInset = 3.0,
+  });
+}
+
+enum CameraDialHaptics { off, light, medium, heavy, vibrate }
+
 /// Configuration for a camera dial (ISO / shutter / zoom / focus).
 ///
-/// Use the named factory constructors ([iso], [shutter], [zoom], [focus]) to
-/// build a preconfigured dial from device capability ranges. Stop arrays and
-/// formatters live here, not in the caller.
+/// Stop arrays, major-tick cadence and formatter are provided by callers.
+/// For predefined camera parameter presets, see `camera_dial_presets.dart`.
 class CameraDialConfig {
   /// Discrete stops used by the dial.
   final List<double> stops;
@@ -25,6 +156,12 @@ class CameraDialConfig {
   /// Shared icon size for both ends (kept equal intentionally).
   final double iconSize;
 
+  /// Appearance/layout style for the slider UI.
+  final CameraDialStyle style;
+
+  /// Haptic behavior when crossing ticks.
+  final CameraDialHaptics haptics;
+
   const CameraDialConfig({
     required this.stops,
     this.majorTickEvery = 1,
@@ -32,187 +169,9 @@ class CameraDialConfig {
     this.leftIcon = Icons.remove,
     this.rightIcon = Icons.add,
     this.iconSize = 20,
+    this.style = const CameraDialStyle(),
+    this.haptics = CameraDialHaptics.heavy,
   });
-
-  // ── Named constructors ────────────────────────────────────────────────────
-
-  /// ISO dial: ~1/6-stop spacing (geometric mean between each 1/3-stop pair).
-  /// Full stops (50, 100, … 6400) land every 6 indices → [majorTickEvery] = 6.
-  factory CameraDialConfig.iso({
-    required double minIso,
-    required double maxIso,
-  }) {
-    const all = <double>[
-      50,
-      57,
-      64,
-      72,
-      80,
-      90,
-      100,
-      112,
-      125,
-      141,
-      160,
-      179,
-      200,
-      224,
-      250,
-      283,
-      320,
-      358,
-      400,
-      447,
-      500,
-      566,
-      640,
-      716,
-      800,
-      894,
-      1000,
-      1118,
-      1250,
-      1414,
-      1600,
-      1789,
-      2000,
-      2236,
-      2500,
-      2828,
-      3200,
-      3578,
-      4000,
-      4472,
-      5000,
-      5657,
-      6400,
-    ];
-    final stops = all.where((v) => v >= minIso && v <= maxIso).toList();
-    return CameraDialConfig(
-      stops: stops.isEmpty ? [minIso, maxIso] : stops,
-      majorTickEvery: 6,
-      formatter: (v) => v.round().toString(),
-      leftIcon: Icons.brightness_5,
-      rightIcon: Icons.brightness_7,
-      iconSize: 20,
-    );
-  }
-
-  /// Shutter dial: standard 1/3-stop values in nanoseconds, filtered to
-  /// [minNs]..[maxNs]. [majorTickEvery] = 3 → major ticks on full stops.
-  factory CameraDialConfig.shutter({
-    required double minNs,
-    required double maxNs,
-  }) {
-    const shutterSeconds = <double>[
-      1 / 8000,
-      1 / 6400,
-      1 / 5000,
-      1 / 4000,
-      1 / 3200,
-      1 / 2500,
-      1 / 2000,
-      1 / 1600,
-      1 / 1250,
-      1 / 1000,
-      1 / 800,
-      1 / 640,
-      1 / 500,
-      1 / 400,
-      1 / 320,
-      1 / 250,
-      1 / 200,
-      1 / 160,
-      1 / 125,
-      1 / 100,
-      1 / 80,
-      1 / 60,
-      1 / 50,
-      1 / 40,
-      1 / 30,
-      1 / 25,
-      1 / 20,
-      1 / 15,
-    ];
-    final allNs = shutterSeconds.map((s) => s * 1e9).toList();
-    final stops = allNs.where((v) => v >= minNs && v <= maxNs).toList();
-    return CameraDialConfig(
-      stops: stops.isEmpty ? [minNs, maxNs] : stops,
-      majorTickEvery: 3,
-      formatter: (v) {
-        final secs = v / 1e9;
-        if (secs < 1.0) return '1/${(1.0 / secs).round()}';
-        return '${secs.toStringAsFixed(1)}s';
-      },
-      leftIcon: Icons.shutter_speed,
-      rightIcon: Icons.shutter_speed,
-      iconSize: 20,
-    );
-  }
-
-  /// Zoom dial: integer-anchored stops (1×, 2×, …) with one 0.5× intermediate.
-  /// [majorTickEvery] = 2 → major ticks on integer zoom values.
-  factory CameraDialConfig.zoom({
-    required double zoomMin,
-    required double zoomMax,
-  }) {
-    final double max = zoomMax > zoomMin + 0.05 ? zoomMax : zoomMin + 1.0;
-    final int firstInt = zoomMin.ceil();
-    final int lastInt = max.floor();
-    final List<double> stops = [];
-    if (zoomMin < firstInt - 0.02) stops.add(zoomMin);
-    for (int z = firstInt; z <= lastInt; z++) {
-      stops.add(z.toDouble());
-      if (z < lastInt) stops.add(z + 0.5);
-    }
-    if (max > lastInt + 0.02) stops.add(max);
-    if (stops.length < 2) stops.add(max);
-    return CameraDialConfig(
-      stops: stops,
-      majorTickEvery: 2,
-      formatter: (v) {
-        if ((v - v.roundToDouble()).abs() < 0.05) return '${v.round()}×';
-        return '${v.toStringAsFixed(1)}×';
-      },
-      leftIcon: Icons.zoom_out,
-      rightIcon: Icons.zoom_in,
-      iconSize: 20,
-    );
-  }
-
-  /// Focus dial: perceptually-spaced diopter anchors with 2 linear
-  /// intermediates between each. [majorTickEvery] = 3 → major ticks on anchors.
-  ///
-  /// [maxDiopter] is the device minimum focus distance in diopters. 0 = ∞.
-  factory CameraDialConfig.focus({required double maxDiopter}) {
-    final double max = maxDiopter > 0.05 ? maxDiopter : 10.0;
-    const anchors = <double>[0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0];
-    final valid = anchors.where((d) => d <= max + 0.05).toList();
-    if ((valid.last - max).abs() > 0.05) valid.add(max);
-    final List<double> stops = [];
-    for (int i = 0; i < valid.length; i++) {
-      stops.add(valid[i]);
-      if (i < valid.length - 1) {
-        final a = valid[i], b = valid[i + 1];
-        stops.add(a + (b - a) / 3.0);
-        stops.add(a + (b - a) * 2.0 / 3.0);
-      }
-    }
-    return CameraDialConfig(
-      stops: stops,
-      majorTickEvery: 3,
-      formatter: (v) {
-        if (v < 0.01) return '∞';
-        final metres = 1.0 / v;
-        if (metres >= 100) return '∞';
-        if (metres >= 1.0) return '${metres.toStringAsFixed(1)}m';
-        return '${(metres * 100).round()}cm';
-      },
-      leftIcon: Icons.center_focus_weak,
-      rightIcon: Icons.center_focus_strong,
-      iconSize: 20,
-    );
-  }
 
   // ── Instance methods ──────────────────────────────────────────────────────
 

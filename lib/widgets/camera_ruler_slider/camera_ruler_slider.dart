@@ -11,36 +11,15 @@ import 'package:flutter/services.dart';
 
 import 'camera_dial_config.dart';
 
-// ── Layout constants ──────────────────────────────────────────────────────────
-
-/// Spacing between adjacent tick marks in logical pixels.
-const double _kTickSpacing = 18.0;
-
-/// Total widget height — gesture-sensitive area.
-const double _kTotalHeight = 44.0;
-
-/// Y offset from widget top where the tick strip begins.
-/// The label area lives above this line.
-const double _kTickTop = 24.0;
-
-/// Horizontal padding reserved on each side for end icons.
-/// Ticks and labels are clipped to [_kIconPad, width − _kIconPad].
-const double _kIconPad = 44.0;
-
-/// Fade zone as fraction of inner viewport width and min/max values.
-const double _kFadeZoneFraction = 0.22;
-const double _kFadeZoneMinPx = 20.0;
-const double _kFadeZoneMaxPx = 90.0;
-const double _kMinFadeVal = 0.3;
-
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 /// Smoothstep alpha: 1 in the centre, 0 at the viewport edge.
 /// Applied per-tick rather than via ShaderMask so fading is correct at
 /// min/max scroll positions (ShaderMask bounds shift with scrolling content).
-double _edgeFade(double x, double viewportWidth) {
-  final double fadeZone = (viewportWidth * _kFadeZoneFraction)
-      .clamp(_kFadeZoneMinPx, _kFadeZoneMaxPx)
+double _edgeFade(double x, double viewportWidth, CameraDialStyle style) {
+  final fade = style.fade;
+  final double fadeZone = (viewportWidth * fade.fadeZoneFraction)
+      .clamp(fade.fadeZoneMinPx, fade.fadeZoneMaxPx)
       .toDouble();
 
   double t = 1.0; // fully visible, no fade
@@ -48,7 +27,7 @@ double _edgeFade(double x, double viewportWidth) {
   if (x > viewportWidth - fadeZone) {
     t = ((viewportWidth - x) / fadeZone).clamp(0.0, 1.0);
   } // right edge
-  t = t * (1 - _kMinFadeVal) + _kMinFadeVal; // scale to [_kMinFadeVal, 1.0]
+  t = t * (1 - fade.minFadeValue) + fade.minFadeValue;
   return t * t * (3.0 - 2.0 * t); // smoothstep curve
 }
 
@@ -115,7 +94,10 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   // ── Drag ───────────────────────────────────────────────────────────────────
 
   void _updateDrag(double delta) {
-    final pxPerPercent = 1.0 / ((widget.config.stopCount - 1) * _kTickSpacing);
+    final pxPerPercent =
+        1.0 /
+        ((widget.config.stopCount - 1) *
+            widget.config.style.layout.tickSpacing);
     final newPercent = (_visualPercent - delta * pxPerPercent).clamp(0.0, 1.0);
     _crossTick(newPercent);
     setState(() => _visualPercent = newPercent);
@@ -129,8 +111,24 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
     );
     if (idx != _lastTickIndex) {
       _lastTickIndex = idx;
-      HapticFeedback.heavyImpact();
+      _emitHaptic();
       widget.onChanged(widget.config.stops[idx]);
+    }
+  }
+
+  void _emitHaptic() {
+    final h = widget.config.haptics;
+    switch (h) {
+      case CameraDialHaptics.off:
+        return;
+      case CameraDialHaptics.light:
+        HapticFeedback.lightImpact();
+      case CameraDialHaptics.medium:
+        HapticFeedback.mediumImpact();
+      case CameraDialHaptics.heavy:
+        HapticFeedback.heavyImpact();
+      case CameraDialHaptics.vibrate:
+        HapticFeedback.vibrate();
     }
   }
 
@@ -190,8 +188,10 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
 
   @override
   Widget build(BuildContext context) {
+    final style = widget.config.style;
+    final layout = style.layout;
     return SizedBox(
-      height: _kTotalHeight,
+      height: layout.totalHeight,
       child: LayoutBuilder(
         builder: (context, constraints) {
           // Tick index 0 position in inner-zone local coordinates.
@@ -200,8 +200,8 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
           final dpr = MediaQuery.of(context).devicePixelRatio;
           final rawOffset =
               constraints.maxWidth / 2 -
-              _visualIndex * _kTickSpacing -
-              _kIconPad;
+              _visualIndex * layout.tickSpacing -
+              layout.iconPad;
           final rulerOffset = (rawOffset * dpr).roundToDouble() / dpr;
 
           return GestureDetector(
@@ -216,8 +216,8 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
               children: [
                 // Ruler zone — clipped so ticks never render over end icons.
                 Positioned(
-                  left: _kIconPad,
-                  right: _kIconPad,
+                  left: layout.iconPad,
+                  right: layout.iconPad,
                   top: 0,
                   bottom: 0,
                   child: ClipRect(
@@ -252,25 +252,25 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
                 // Centre indicator — bottom: 3 creates a small gap beneath ticks.
                 Positioned(
                   top: 0,
-                  bottom: 3,
-                  left: _kIconPad,
-                  right: _kIconPad,
-                  child: const Align(
+                  bottom: style.indicator.bottomInset,
+                  left: layout.iconPad,
+                  right: layout.iconPad,
+                  child: Align(
                     alignment: Alignment.bottomCenter,
-                    child: _Indicator(),
+                    child: _Indicator(style: style),
                   ),
                 ),
 
                 if (widget.leftIcon != null)
                   Positioned(
-                    left: 12,
+                    left: layout.iconInset,
                     top: 0,
                     bottom: 0,
                     child: Center(child: widget.leftIcon!),
                   ),
                 if (widget.rightIcon != null)
                   Positioned(
-                    right: 12,
+                    right: layout.iconInset,
                     top: 0,
                     bottom: 0,
                     child: Center(child: widget.rightIcon!),
@@ -297,8 +297,6 @@ class _TicksPainter extends CustomPainter {
   /// Device pixel ratio — snaps each tick x to a whole physical pixel.
   final double dpr;
 
-  static const Color _tickColor = Color(0xFFD4847A);
-
   const _TicksPainter({
     required this.config,
     required this.rulerOffset,
@@ -307,18 +305,22 @@ class _TicksPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final style = config.style;
+    final layout = style.layout;
+    final ticks = style.ticks;
     final n = config.stopCount;
     if (n < 2) return;
 
-    // Tick strip bottom at _kTickTop + 16. Painting to size.height would clip
+    // Tick strip bottom at tickTop + majorTickHeight. Painting to size.height would clip
     // against the outer ClipRect at the widget's bottom edge.
-    const double bottom = _kTickTop + 16.0;
+    final double bottom = layout.tickTop + ticks.majorHeight;
 
-    final int iFirst = ((-_kTickSpacing - rulerOffset) / _kTickSpacing)
-        .floor()
-        .clamp(0, n - 1);
+    final int iFirst =
+        ((-layout.tickSpacing - rulerOffset) / layout.tickSpacing)
+            .floor()
+            .clamp(0, n - 1);
     final int iLast =
-        ((size.width + _kTickSpacing - rulerOffset) / _kTickSpacing)
+        ((size.width + layout.tickSpacing - rulerOffset) / layout.tickSpacing)
             .ceil()
             .clamp(0, n - 1);
 
@@ -327,19 +329,21 @@ class _TicksPainter extends CustomPainter {
     for (int i = iFirst; i <= iLast; i++) {
       // Snap to whole physical pixel — integer columns, no AA blur.
       final double x =
-          ((rulerOffset + i * _kTickSpacing) * dpr).roundToDouble() / dpr;
+          ((rulerOffset + i * layout.tickSpacing) * dpr).roundToDouble() / dpr;
 
-      final double fade = _edgeFade(x, size.width);
+      final double fade = _edgeFade(x, size.width, style);
       if (fade <= 0) continue;
 
       final bool isMajor = i % config.majorTickEvery == 0;
       paint
-        ..strokeWidth = isMajor ? 2.0 : 1.0
-        ..color = _tickColor.withValues(alpha: (isMajor ? 0.85 : 0.45) * fade);
+        ..strokeWidth = isMajor ? ticks.majorWidth : ticks.minorWidth
+        ..color = ticks.color.withValues(
+          alpha: (isMajor ? ticks.majorOpacity : ticks.minorOpacity) * fade,
+        );
 
       canvas.drawLine(
         Offset(x, bottom),
-        Offset(x, bottom - (isMajor ? 14.0 : 7.0)),
+        Offset(x, bottom - (isMajor ? ticks.majorHeight : ticks.minorHeight)),
         paint,
       );
     }
@@ -349,20 +353,23 @@ class _TicksPainter extends CustomPainter {
   bool shouldRepaint(covariant _TicksPainter old) =>
       old.rulerOffset != rulerOffset ||
       old.config.stopCount != config.stopCount ||
-      old.config.majorTickEvery != config.majorTickEvery;
+      old.config.majorTickEvery != config.majorTickEvery ||
+      old.config.style != config.style;
 }
 
 /// Capsule indicator anchored at the ruler's centre — marks the current value.
 class _Indicator extends StatelessWidget {
-  const _Indicator();
+  final CameraDialStyle style;
+
+  const _Indicator({required this.style});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 6,
-      height: 20,
+      width: style.indicator.width,
+      height: style.indicator.height,
       decoration: BoxDecoration(
-        color: const Color(0xFFED9478),
+        color: style.indicator.color,
         borderRadius: BorderRadius.circular(100),
       ),
     );
@@ -376,12 +383,6 @@ class _LabelsPainter extends CustomPainter {
   final double visualIndex;
   final double rulerOffset;
 
-  // -6 px baseline offset so tall bold glyphs don't clip against the top
-  // of the inner ClipRect.
-  static const double _baselineOffset = -6.0;
-  static const double _minGap = 18.0;
-  static const int _maxPerSide = 2;
-
   const _LabelsPainter({
     required this.config,
     required this.visualIndex,
@@ -394,14 +395,20 @@ class _LabelsPainter extends CustomPainter {
     double viewportWidth, {
     required bool isCenter,
   }) {
-    final double fade = _edgeFade(x, viewportWidth);
+    final style = config.style;
+    final labels = style.labels;
+    final double fade = _edgeFade(x, viewportWidth, style);
     return TextPainter(
       text: TextSpan(
         text: config.format(config.stops[idx]),
         style: TextStyle(
-          color: Colors.white.withValues(alpha: isCenter ? fade : 0.45 * fade),
-          fontSize: isCenter ? 18.0 : 10.0,
-          fontWeight: isCenter ? FontWeight.w600 : FontWeight.normal,
+          color: Colors.white.withValues(
+            alpha: isCenter ? fade : labels.sideOpacity * fade,
+          ),
+          fontSize: isCenter ? labels.centerFontSize : labels.sideFontSize,
+          fontWeight: isCenter
+              ? labels.centerFontWeight
+              : labels.sideFontWeight,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -409,17 +416,24 @@ class _LabelsPainter extends CustomPainter {
   }
 
   void _paint(Canvas canvas, TextPainter tp, double x) {
+    final style = config.style;
     tp.paint(
       canvas,
-      Offset(x - tp.width / 2, _kTickTop + _baselineOffset - tp.height),
+      Offset(
+        x - tp.width / 2,
+        style.layout.tickTop + style.labels.baselineOffset - tp.height,
+      ),
     );
   }
 
   @override
   void paint(Canvas canvas, Size size) {
+    final style = config.style;
+    final layout = style.layout;
+    final labels = style.labels;
     final int step = config.majorTickEvery;
     final int centerIdx = visualIndex.round().clamp(0, config.stopCount - 1);
-    final double centerX = rulerOffset + visualIndex * _kTickSpacing;
+    final double centerX = rulerOffset + visualIndex * layout.tickSpacing;
 
     // Centre label — always rendered.
     final center = _makeLabel(centerIdx, centerX, size.width, isCenter: true);
@@ -431,13 +445,13 @@ class _LabelsPainter extends CustomPainter {
     int drawnR = 0;
     for (
       int i = ((visualIndex / step).ceil() * step);
-      i < config.stopCount && drawnR < _maxPerSide;
+      i < config.stopCount && drawnR < labels.maxPerSide;
       i += step
     ) {
-      final double x = rulerOffset + i * _kTickSpacing;
-      if (x > size.width + 60) break;
+      final double x = rulerOffset + i * layout.tickSpacing;
+      if (x > size.width + labels.cullMargin) break;
       final tp = _makeLabel(i, x, size.width, isCenter: false);
-      if (x - tp.width / 2 - rightBound >= _minGap) {
+      if (x - tp.width / 2 - rightBound >= labels.minGap) {
         _paint(canvas, tp, x);
         rightBound = x + tp.width / 2;
         drawnR++;
@@ -448,14 +462,14 @@ class _LabelsPainter extends CustomPainter {
     int drawnL = 0;
     for (
       int i = ((visualIndex / step).floor() * step);
-      i >= 0 && drawnL < _maxPerSide;
+      i >= 0 && drawnL < labels.maxPerSide;
       i -= step
     ) {
       if (i == centerIdx) continue;
-      final double x = rulerOffset + i * _kTickSpacing;
-      if (x < -60) break;
+      final double x = rulerOffset + i * layout.tickSpacing;
+      if (x < -labels.cullMargin) break;
       final tp = _makeLabel(i, x, size.width, isCenter: false);
-      if (leftBound - (x + tp.width / 2) >= _minGap) {
+      if (leftBound - (x + tp.width / 2) >= labels.minGap) {
         _paint(canvas, tp, x);
         leftBound = x - tp.width / 2;
         drawnL++;
