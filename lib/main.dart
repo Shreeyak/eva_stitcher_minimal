@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
 import 'camera/camera_control.dart';
+import 'camera/latest_value_sender.dart';
 import 'camera/camera_state.dart';
 import 'widgets/bottom_info_bar.dart';
 import 'widgets/camera_settings_drawer.dart';
@@ -78,9 +79,9 @@ class _CameraScreenState extends State<CameraScreen> {
   StreamSubscription<Map<dynamic, dynamic>>? _eventSub;
 
   // ── Camera command sequencing ─────────────────────────────────────
-  double? _pendingFocusDistance;
-  double _lastAppliedFocusDistance = 0.0;
-  bool _focusUpdateRunning = false;
+  late final LatestValueSender<int> _isoSender;
+  late final LatestValueSender<int> _shutterSender;
+  late final LatestValueSender<double> _focusSender;
   bool _focusNeedsAfDisable = false;
   Timer? _afFocusSyncTimer;
   bool _afFocusSyncInFlight = false;
@@ -103,6 +104,7 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   void initState() {
     super.initState();
+    _initSliderValueSenders();
     _callbacks = CameraCallbacks(
       onIsoChanged: _onIsoChanged,
       onExposureTimeNsChanged: _onExposureTimeNsChanged,
@@ -113,6 +115,63 @@ class _CameraScreenState extends State<CameraScreen> {
       onToggleAf: _toggleAf,
     );
     _initCamera();
+  }
+
+  /// Initializes latest-value senders for slider-driven native updates.
+  ///
+  /// UI state is updated immediately in [_onIsoChanged],
+  /// [_onExposureTimeNsChanged], and [_onFocusChanged]. These senders only
+  /// serialize platform calls so rapid scrubs cannot leave Camera2 state
+  /// behind UI state.
+  void _initSliderValueSenders() {
+    _isoSender = LatestValueSender<int>(
+      send: (iso) => CameraControl.setIso(iso),
+      onError: (error, lastApplied) {
+        if (!mounted || lastApplied == null) return;
+        setState(() => _values = _values.copyWith(isoValue: lastApplied));
+        _showWarning('ISO update failed: $error');
+      },
+    );
+
+    _shutterSender = LatestValueSender<int>(
+      send: (ns) => CameraControl.setExposureTimeNs(ns),
+      onError: (error, lastApplied) {
+        if (!mounted || lastApplied == null) return;
+        setState(() => _values = _values.copyWith(exposureTimeNs: lastApplied));
+        _showWarning('Shutter update failed: $error');
+      },
+    );
+
+    _focusSender = LatestValueSender<double>(
+      send: (dist) async {
+        // If Auto-Focus enabled, disable AF first before setting manual focus.
+        // The flag is set by _onFocusChanged.
+        if (_focusNeedsAfDisable) {
+          await CameraControl.setAfEnabled(false);
+          _focusNeedsAfDisable = false;
+        }
+        await CameraControl.setFocusDistance(dist);
+      },
+      onError: (error, lastApplied) {
+        final failedToDisableAf = _focusNeedsAfDisable;
+        _focusNeedsAfDisable = false;
+        if (!mounted) return;
+
+        final fallbackDistance = lastApplied ?? _values.focusDistance;
+        setState(() {
+          _values = _values.copyWith(
+            focusDistance: fallbackDistance,
+            afEnabled: failedToDisableAf ? true : _values.afEnabled,
+          );
+        });
+
+        if (failedToDisableAf) {
+          _showError('AF disable failed: $error');
+          return;
+        }
+        _showError('Focus update failed: $error');
+      },
+    );
   }
 
   Future<void> _initCamera() async {
@@ -165,7 +224,9 @@ class _CameraScreenState extends State<CameraScreen> {
         _ranges = ranges;
         _values = initial;
       });
-      _lastAppliedFocusDistance = initial.focusDistance;
+      _isoSender.lastApplied = initial.isoValue;
+      _shutterSender.lastApplied = initial.exposureTimeNs;
+      _focusSender.lastApplied = initial.focusDistance;
 
       // Sync computed initial values to the native camera.
       //
@@ -220,6 +281,9 @@ class _CameraScreenState extends State<CameraScreen> {
     _eventSub?.cancel();
     _sessionTimer?.cancel();
     _afFocusSyncTimer?.cancel();
+    _isoSender.cancel();
+    _shutterSender.cancel();
+    _focusSender.cancel();
     CameraControl.stopCamera();
     super.dispose();
   }
@@ -286,10 +350,10 @@ class _CameraScreenState extends State<CameraScreen> {
     try {
       await CameraControl.setAfEnabled(newAf);
       if (newAf) {
-        _pendingFocusDistance = null;
+        _focusSender.cancel();
         _focusNeedsAfDisable = false;
       } else {
-        _lastAppliedFocusDistance = _values.focusDistance;
+        _focusSender.lastApplied = _values.focusDistance;
       }
       _updateAfFocusSync();
     } catch (e) {
@@ -318,12 +382,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
   void _onIsoChanged(int iso) {
     setState(() => _values = _values.copyWith(isoValue: iso));
-    CameraControl.setIso(iso);
+    _isoSender.update(iso);
   }
 
   void _onExposureTimeNsChanged(int ns) {
     setState(() => _values = _values.copyWith(exposureTimeNs: ns));
-    CameraControl.setExposureTimeNs(ns);
+    _shutterSender.update(ns);
   }
 
   void _onFocusChanged(double dist) {
@@ -337,63 +401,8 @@ class _CameraScreenState extends State<CameraScreen> {
 
     _updateAfFocusSync();
 
-    _pendingFocusDistance = dist;
-    if (wasAfEnabled) {
-      _focusNeedsAfDisable = true;
-    }
-    if (!_focusUpdateRunning) _processPendingFocusUpdates();
-  }
-
-  Future<void> _processPendingFocusUpdates() async {
-    _focusUpdateRunning = true;
-    try {
-      while (_focusNeedsAfDisable || _pendingFocusDistance != null) {
-        if (_focusNeedsAfDisable) {
-          try {
-            await CameraControl.setAfEnabled(false);
-            _focusNeedsAfDisable = false;
-          } catch (e) {
-            _pendingFocusDistance = null;
-            _focusNeedsAfDisable = false;
-            if (!mounted) return;
-            setState(() {
-              _values = _values.copyWith(
-                focusDistance: _lastAppliedFocusDistance,
-                afEnabled: true,
-              );
-            });
-            _showError('AF disable failed: $e');
-            return;
-          }
-        }
-
-        final dist = _pendingFocusDistance;
-        if (dist == null) continue;
-        _pendingFocusDistance = null;
-
-        try {
-          await CameraControl.setFocusDistance(dist);
-          _lastAppliedFocusDistance = dist;
-        } catch (e) {
-          _pendingFocusDistance = null;
-          if (!mounted) return;
-          setState(() {
-            _values = _values.copyWith(
-              focusDistance: _lastAppliedFocusDistance,
-            );
-          });
-          _showError('Focus update failed: $e');
-          return;
-        }
-      }
-    } finally {
-      _focusUpdateRunning = false;
-    }
-
-    if ((_focusNeedsAfDisable || _pendingFocusDistance != null) &&
-        !_focusUpdateRunning) {
-      _processPendingFocusUpdates();
-    }
+    if (wasAfEnabled) _focusNeedsAfDisable = true;
+    _focusSender.update(dist);
   }
 
   bool get _shouldSyncAfFocusDistance =>
@@ -426,7 +435,7 @@ class _CameraScreenState extends State<CameraScreen> {
       if (!mounted || !_shouldSyncAfFocusDistance) return;
       if ((dist - _values.focusDistance).abs() < 0.001) return;
       setState(() => _values = _values.copyWith(focusDistance: dist));
-      _lastAppliedFocusDistance = dist;
+      _focusSender.lastApplied = dist;
     } catch (_) {
       // Best-effort UI sync only — ignore transient read failures.
     } finally {

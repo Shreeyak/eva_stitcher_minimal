@@ -2,6 +2,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../app_theme.dart';
 
+bool _isNearInteger(double value, {double epsilon = 0.05}) {
+  return (value - value.roundToDouble()).abs() < epsilon;
+}
+
 /// A horizontally scrollable ruler-style value picker.
 ///
 /// Drag left/right to change [value] within [[min], [max]].
@@ -159,9 +163,8 @@ class _RulerPainter extends CustomPainter {
       final x = cx + (mt - value) * (pixelsPerStep / step);
       if (x >= 0 && x <= size.width) {
         // skip positions that coincide with a major tick
-        final isMajor =
-            ((mt - min) / step - (mt - min) / step).abs() < 0.01 ||
-            (mt / step - (mt / step).roundToDouble()).abs() < 0.05;
+        final tickIndex = (mt - min) / step;
+        final isMajor = _isNearInteger(tickIndex);
         if (!isMajor) {
           canvas.drawLine(
             Offset(x, size.height * 0.15),
@@ -231,5 +234,10 @@ class _RulerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_RulerPainter old) =>
-      old.value != value || old.min != min || old.max != max;
+      old.value != value ||
+      old.min != min ||
+      old.max != max ||
+      old.step != step ||
+      old.pixelsPerStep != pixelsPerStep ||
+      old.labelBuilder != labelBuilder;
 }

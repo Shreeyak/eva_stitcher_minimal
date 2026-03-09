@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-03-09 (update 29)
+
+### Ruler helper readability cleanup
+
+- Extracted `_isNearInteger(...)` in `ruler_picker.dart` and switched major-tick detection to use it for cleaner, self-documenting tick math.
+
+## 2026-03-09 (update 28)
+
+### Slider sender clarity + ruler tick fix
+
+- Renamed sender init helper in `main.dart` to `_initSliderValueSenders()` and clarified focus prerequisite comments for AF-disable-before-manual-focus behavior.
+- Fixed `RulerPicker` major-tick detection (removed a tautological expression), so minor ticks no longer misclassify major positions.
+- Expanded `_RulerPainter.shouldRepaint` to include `step`, `pixelsPerStep`, and `labelBuilder` changes.
+
+## 2026-03-09 (update 27)
+
+### Unified latest-value slider sender
+
+- Added `lib/camera/latest_value_sender.dart`: a small latest-value-wins async sender used to serialize slider-driven native updates.
+- Refactored ISO and shutter handlers to update UI immediately but send native updates through the shared sender, preventing in-flight Camera2 option update churn during scrubs.
+- Replaced the custom focus worker with the same sender while preserving AF-disable-before-focus behavior and keeping AF-specific failure handling in `main.dart`.
+
 ## 2026-03-09 (update 26)
 
 ### Focus slider AF handoff

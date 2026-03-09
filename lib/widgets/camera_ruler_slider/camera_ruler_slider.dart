@@ -481,5 +481,7 @@ class _LabelsPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LabelsPainter old) =>
-      old.visualIndex != visualIndex || old.rulerOffset != rulerOffset;
+      old.visualIndex != visualIndex ||
+      old.rulerOffset != rulerOffset ||
+      old.config != config;
 }
