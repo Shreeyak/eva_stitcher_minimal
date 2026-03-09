@@ -31,9 +31,7 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
+        ndk { abiFilters += "arm64-v8a" }
 
         externalNativeBuild {
             cmake {
