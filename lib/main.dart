@@ -153,6 +153,12 @@ class _CameraScreenState extends State<CameraScreen> {
             break;
           case CameraSettingKey.wb:
             _showWarning('WB update failed: $error');
+            // Revert the optimistic UI flip — native call did not complete.
+            if (mounted) {
+              setState(
+                () => _values = _values.copyWith(wbLocked: !_values.wbLocked),
+              );
+            }
             break;
         }
       },

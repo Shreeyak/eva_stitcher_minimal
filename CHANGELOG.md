@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-03-09 (update 33)
+
+### Fix missing @OptIn on resolveMaxAeFpsRange
+
+- Added `@OptIn(ExperimentalCamera2Interop::class)` to `resolveMaxAeFpsRange` in `CameraManager.kt` to match the rest of the file and prevent compilation failure.
+
+## 2026-03-09 (update 32)
+
+### Fix WB lock UI/native desync on failure
+
+- In `_initSettingsQueue` `onError` for `CameraSettingKey.wb`, added a `setState` that flips `wbLocked` back, reverting the optimistic UI update when the native lock/unlock call fails.
+
+## 2026-03-09 (update 31)
+
+### Fix CameraRulerDial spurious resyncs on parent rebuild
+
+- Removed `config` identity check from `didUpdateWidget` in `camera_ruler_dial.dart`; only `initialValue` changes now trigger `_syncToInitialValue()`.
+- Prevents the dial from jumping back to `initialValue` during FPS-event rebuilds (every 500 ms) while the user is dragging.
+
 ## 2026-03-09 (update 30)
 
 ### AE FPS range initialization and max-range selection

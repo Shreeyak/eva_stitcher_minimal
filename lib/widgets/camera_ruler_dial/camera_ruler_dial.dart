@@ -85,8 +85,7 @@ class _CameraRulerDialState extends State<CameraRulerDial> {
   @override
   void didUpdateWidget(covariant CameraRulerDial oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.initialValue != widget.initialValue ||
-        oldWidget.config != widget.config) {
+    if (oldWidget.initialValue != widget.initialValue) {
       _syncToInitialValue();
     }
   }

@@ -411,6 +411,7 @@ class CameraManager(
 
     // ── AE FPS range resolution ─────────────────────────────────────────
 
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun resolveMaxAeFpsRange(camera: Camera): Range<Int>? {
         val ranges =
             Camera2CameraInfo
