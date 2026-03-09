@@ -88,6 +88,10 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _showCanvas = false;
   bool _settingsDrawerOpen = false;
 
+  /// Last WB-lock value that was *confirmed* by native (before any pending
+  /// optimistic flip). Used to revert the UI if the native call fails.
+  bool _committedWbLocked = false;
+
   /// Which "floating" param is currently showing its [CameraRulerDial]
   /// overlay above the camera preview.  Null = no overlay visible.
   /// Set by [_onHoverParamTap]; cleared when the drawer is closed.
@@ -153,10 +157,13 @@ class _CameraScreenState extends State<CameraScreen> {
             break;
           case CameraSettingKey.wb:
             _showWarning('WB update failed: $error');
-            // Revert the optimistic UI flip — native call did not complete.
+            // Revert to the last confirmed native WB state.
+            // Using _committedWbLocked (captured before the optimistic flip)
+            // is safer than !_values.wbLocked, which can be wrong if the user
+            // tapped lock→unlock quickly and the two flips crossed in flight.
             if (mounted) {
               setState(
-                () => _values = _values.copyWith(wbLocked: !_values.wbLocked),
+                () => _values = _values.copyWith(wbLocked: _committedWbLocked),
               );
             }
             break;
@@ -303,12 +310,16 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _lockWb() async {
     if (!mounted) return;
+    // Save pre-optimistic state so the error handler can revert correctly.
+    _committedWbLocked = _values.wbLocked;
     setState(() => _values = _values.copyWith(wbLocked: true));
     _settingsQueue.updateWbLock(true);
   }
 
   Future<void> _unlockWb() async {
     if (!mounted) return;
+    // Save pre-optimistic state so the error handler can revert correctly.
+    _committedWbLocked = _values.wbLocked;
     setState(() => _values = _values.copyWith(wbLocked: false));
     _settingsQueue.updateWbLock(false);
   }

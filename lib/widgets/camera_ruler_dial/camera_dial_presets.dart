@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import 'package:material_symbols_icons/symbols.dart';
 import 'camera_dial_config.dart';
 
 /// Bundles the slider config + initial value + callback for one camera param.
@@ -155,8 +155,8 @@ class ShutterDialPreset {
         if (secs < 1.0) return '1/${(1.0 / secs).round()}';
         return '${secs.toStringAsFixed(1)}s';
       },
-      leftIcon: Icons.train,
-      rightIcon: Icons.transfer_within_a_station,
+      leftIcon: Symbols.shutter_speed_add,
+      rightIcon: Symbols.shutter_speed_minus,
       iconSize: 20,
     );
 

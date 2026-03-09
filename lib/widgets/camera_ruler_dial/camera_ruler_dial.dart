@@ -2,8 +2,6 @@
 ///
 /// Features: tick snapping, haptic feedback, edge fade, optional inertia,
 /// logarithmic value mapping, end icons.
-library;
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'camera_dial_config.dart';

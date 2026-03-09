@@ -12,7 +12,7 @@ scripts/tmp_files/**
 .vscode/
 
 # Miscellaneous
-*pubscpec.lock
+pubspec.lock
 *.class
 *.log
 *.pyc
