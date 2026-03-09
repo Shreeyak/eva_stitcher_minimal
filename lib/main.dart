@@ -117,7 +117,7 @@ class _CameraScreenState extends State<CameraScreen> {
   /// Initializes a unified latest-wins queue for camera-setting writes.
   ///
   /// UI state still updates immediately in callbacks. The queue only serializes
-  /// native writes so rapid scrubs on ruler dial don't pile up or interleave.
+  /// native writes so rapid scrubs don't pile up or interleave.
   void _initSettingsQueue() {
     _settingsQueue = CameraSettingsQueue(
       sendAf: CameraControl.setAfEnabled,
@@ -125,9 +125,13 @@ class _CameraScreenState extends State<CameraScreen> {
       sendIso: CameraControl.setIso,
       sendShutter: CameraControl.setExposureTimeNs,
       sendZoom: CameraControl.setZoomRatio,
-      sendWbLock: (locked) => locked
-          ? CameraControl.lockWhiteBalance()
-          : CameraControl.unlockWhiteBalance(),
+      sendWbLock: (locked) async {
+        if (locked) {
+          await CameraControl.lockWhiteBalance();
+        } else {
+          await CameraControl.unlockWhiteBalance();
+        }
+      },
       initialAfEnabled: _values.afEnabled,
       onError: (key, error) {
         if (!mounted) return;

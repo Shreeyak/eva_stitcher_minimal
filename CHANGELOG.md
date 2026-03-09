@@ -2,6 +2,13 @@
 
 ## 2026-03-09 (update 30)
 
+### AE FPS range initialization and max-range selection
+
+- `CameraManager.kt` now records the default live AE FPS range from the first `TotalCaptureResult` and stores it in `defaultAeTargetFpsRange` for diagnostics.
+- Added storage of all device-supported AE FPS ranges from `CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES` and logs them during camera startup.
+- On camera init, selects the highest supported FPS range (prefers fixed max like `[60,60]`) and applies it through `applyAllCaptureOptions()`.
+- AE FPS cached values are reset on camera start/stop to avoid stale range/default values across rebinds.
+
 ### Unified camera settings latest-wins queue
 
 - Replaced per-slider senders in `main.dart` with a unified `CameraSettingsQueue` (`lib/camera/camera_settings_queue.dart`) that serializes native camera writes and keeps only the latest pending value per setting key.

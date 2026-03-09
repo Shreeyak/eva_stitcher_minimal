@@ -1,5 +1,4 @@
-typedef LatestValueErrorHandler<T> =
-    void Function(Object error, T? lastApplied);
+typedef LatestValueErrorHandler<T> = void Function(Object error, T? lastApplied);
 
 /// Serializes async sends while keeping only the latest pending value.
 ///
