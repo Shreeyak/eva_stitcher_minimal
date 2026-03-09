@@ -53,15 +53,18 @@ import java.util.concurrent.TimeUnit
  * stay native-side (no streaming to Dart). In phase 2, frames will be passed to C++ via JNI for
  * stitching.
  */
-class CameraManager(private val context: Context, private val lifecycleOwner: LifecycleOwner) {
+class CameraManager(
+    private val context: Context,
+    private val lifecycleOwner: LifecycleOwner,
+) {
     companion object {
         private const val TAG = "EvaCamera"
 
         /** Identity color correction transform — fallback for manual WB. */
         private val IDENTITY_COLOR_TRANSFORM =
-                ColorSpaceTransform(
-                        intArrayOf(1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1)
-                )
+            ColorSpaceTransform(
+                intArrayOf(1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1),
+            )
     }
 
     // ── Camera state ────────────────────────────────────────────────────
@@ -82,14 +85,22 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
 
     // Device capability ranges — populated from CameraCharacteristics after camera starts
     @Volatile private var exposureTimeRangeNs: Range<Long>? = null
+
     @Volatile private var sensitivityIsoRange: Range<Int>? = null
+
+    @Volatile private var defaultAeTargetFpsRange: Range<Int>? = null
+
+    @Volatile private var availableAeTargetFpsRanges: Array<Range<Int>> = emptyArray()
+    private var aeTargetFpsRange: Range<Int>? = null
 
     // Focus distance captured from live AF results
     @Volatile private var capturedFocusDistance: Float? = null
 
     // WB lock: captured from live AWB TotalCaptureResults
     @Volatile private var capturedColorTransform: ColorSpaceTransform? = null
+
     @Volatile private var capturedColorGains: RggbChannelVector? = null
+
     // Static CCM from CameraCharacteristics (fallback)
     @Volatile private var staticColorTransform: ColorSpaceTransform? = null
 
@@ -103,8 +114,11 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
 
     // ── Frame counting / FPS ────────────────────────────────────────────
     @Volatile private var frameCount: Long = 0
+
     @Volatile private var lastFpsTime: Long = System.nanoTime()
+
     @Volatile private var lastFpsFrameCount: Long = 0
+
     @Volatile private var currentFps: Double = 0.0
     private var fpsTimer: Runnable? = null
 
@@ -150,6 +164,11 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
             return
         }
 
+        // Reset startup-resolved AE FPS metadata for a fresh bind session.
+        defaultAeTargetFpsRange = null
+        availableAeTargetFpsRanges = emptyArray()
+        aeTargetFpsRange = null
+
         if (cameraExecutor == null || cameraExecutor!!.isShutdown) {
             cameraExecutor = Executors.newSingleThreadExecutor()
         }
@@ -157,139 +176,173 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
 
         cameraProviderFuture.addListener(
-                {
-                    try {
-                        val provider = cameraProviderFuture.get()
-                        this.cameraProvider = provider
+            {
+                try {
+                    val provider = cameraProviderFuture.get()
+                    this.cameraProvider = provider
 
-                        // ── Resolution selectors ──
-                        val captureResolution =
-                                ResolutionSelector.Builder()
-                                        .setResolutionStrategy(
-                                                ResolutionStrategy(
-                                                        Size(3120, 2160),
-                                                        ResolutionStrategy
-                                                                .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                    // ── Resolution selectors ──
+                    val captureResolution =
+                        ResolutionSelector
+                            .Builder()
+                            .setResolutionStrategy(
+                                ResolutionStrategy(
+                                    Size(3120, 2160),
+                                    ResolutionStrategy
+                                        .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                                ),
+                            ).build()
+
+                    val analysisResolution =
+                        ResolutionSelector
+                            .Builder()
+                            .setResolutionStrategy(
+                                ResolutionStrategy(
+                                    Size(640, 480),
+                                    ResolutionStrategy
+                                        .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                                ),
+                            ).build()
+
+                    // ── Preview ──
+                    val preview =
+                        Preview
+                            .Builder()
+                            .setTargetRotation(Surface.ROTATION_0)
+                            .build()
+                            .also { it.setSurfaceProvider(pv.surfaceProvider) }
+
+                    // ── ImageCapture ──
+                    imageCapture =
+                        ImageCapture
+                            .Builder()
+                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                            .setResolutionSelector(captureResolution)
+                            .setTargetRotation(Surface.ROTATION_0)
+                            .build()
+
+                    // ── ImageAnalysis (YUV_420_888 for future C++ BGR conversion) ──
+                    val analysisBuilder =
+                        ImageAnalysis
+                            .Builder()
+                            .setResolutionSelector(analysisResolution)
+                            .setOutputImageFormat(
+                                ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888,
+                            ).setBackpressureStrategy(
+                                ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST,
+                            ).setTargetRotation(Surface.ROTATION_0)
+
+                    // Attach Camera2 capture callback to snoop live AWB/AF values
+                    Camera2Interop
+                        .Extender(analysisBuilder)
+                        .setSessionCaptureCallback(
+                            object : CameraCaptureSession.CaptureCallback() {
+                                override fun onCaptureCompleted(
+                                    session: CameraCaptureSession,
+                                    request: CaptureRequest,
+                                    result: TotalCaptureResult,
+                                ) {
+                                    // Capture live AWB CCM + gains while AWB is running
+                                    val awbMode =
+                                        result.get(CaptureResult.CONTROL_AWB_MODE)
+                                    if (awbMode == CameraMetadata.CONTROL_AWB_MODE_AUTO) {
+                                        result
+                                            .get(
+                                                CaptureResult
+                                                    .COLOR_CORRECTION_TRANSFORM,
+                                            )?.let { capturedColorTransform = it }
+                                        result
+                                            .get(CaptureResult.COLOR_CORRECTION_GAINS)
+                                            ?.let { capturedColorGains = it }
+                                    }
+                                    // Capture live focus distance
+                                    result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let {
+                                        capturedFocusDistance = it
+                                    }
+
+                                    // Capture default AE target FPS range once.
+                                    if (defaultAeTargetFpsRange == null) {
+                                        result
+                                            .get(
+                                                CaptureResult
+                                                    .CONTROL_AE_TARGET_FPS_RANGE,
+                                            )?.let {
+                                                defaultAeTargetFpsRange = it
+                                                Log.i(
+                                                    TAG,
+                                                    "Default AE FPS from first capture result: [${it.lower}, ${it.upper}]",
                                                 )
-                                        )
-                                        .build()
-
-                        val analysisResolution =
-                                ResolutionSelector.Builder()
-                                        .setResolutionStrategy(
-                                                ResolutionStrategy(
-                                                        Size(640, 480),
-                                                        ResolutionStrategy
-                                                                .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                                                )
-                                        )
-                                        .build()
-
-                        // ── Preview ──
-                        val preview =
-                                Preview.Builder()
-                                        .setTargetRotation(Surface.ROTATION_0)
-                                        .build()
-                                        .also { it.setSurfaceProvider(pv.surfaceProvider) }
-
-                        // ── ImageCapture ──
-                        imageCapture =
-                                ImageCapture.Builder()
-                                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                                        .setResolutionSelector(captureResolution)
-                                        .setTargetRotation(Surface.ROTATION_0)
-                                        .build()
-
-                        // ── ImageAnalysis (YUV_420_888 for future C++ BGR conversion) ──
-                        val analysisBuilder =
-                                ImageAnalysis.Builder()
-                                        .setResolutionSelector(analysisResolution)
-                                        .setOutputImageFormat(
-                                                ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888
-                                        )
-                                        .setBackpressureStrategy(
-                                                ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
-                                        )
-                                        .setTargetRotation(Surface.ROTATION_0)
-
-                        // Attach Camera2 capture callback to snoop live AWB/AF values
-                        Camera2Interop.Extender(analysisBuilder)
-                                .setSessionCaptureCallback(
-                                        object : CameraCaptureSession.CaptureCallback() {
-                                            override fun onCaptureCompleted(
-                                                    session: CameraCaptureSession,
-                                                    request: CaptureRequest,
-                                                    result: TotalCaptureResult
-                                            ) {
-                                                // Capture live AWB CCM + gains while AWB is running
-                                                val awbMode =
-                                                        result.get(CaptureResult.CONTROL_AWB_MODE)
-                                                if (awbMode == CameraMetadata.CONTROL_AWB_MODE_AUTO
-                                                ) {
-                                                    result.get(
-                                                                    CaptureResult
-                                                                            .COLOR_CORRECTION_TRANSFORM
-                                                            )
-                                                            ?.let { capturedColorTransform = it }
-                                                    result.get(CaptureResult.COLOR_CORRECTION_GAINS)
-                                                            ?.let { capturedColorGains = it }
-                                                }
-                                                // Capture live focus distance
-                                                result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let {
-                                                    capturedFocusDistance = it
-                                                }
                                             }
-                                        }
-                                )
-
-                        imageAnalysis =
-                                analysisBuilder.build().also { analysis ->
-                                    analysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
-                                        processFrame(imageProxy)
                                     }
                                 }
+                            },
+                        )
 
-                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                        provider.unbindAll()
-                        val cam =
-                                provider.bindToLifecycle(
-                                        lifecycleOwner,
-                                        cameraSelector,
-                                        preview,
-                                        imageCapture!!,
-                                        imageAnalysis!!
-                                )
-                        this.camera = cam
-
-                        // Load static characteristics (CCM, ranges) and dump to file
-                        loadStaticColorTransform(cam)
-
-                        // Reset frame counter
-                        frameCount = 0
-                        lastFpsTime = System.nanoTime()
-                        lastFpsFrameCount = 0
-                        currentFps = 0.0
-
-                        // Start FPS reporting timer
-                        startFpsTimer()
-
-                        applyAllCaptureOptions(cam) { error ->
-                            if (error != null) {
-                                Log.e(TAG, "Initial capture options apply failed", error)
-                                callback(null, error)
-                            } else {
-                                callback(gatherResolutionInfo(), null)
-                                pushEvent("status", "camera", "Camera started")
-                                pushSettingsStatus()
+                    imageAnalysis =
+                        analysisBuilder.build().also { analysis ->
+                            analysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
+                                processFrame(imageProxy)
                             }
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Camera start failed", e)
-                        callback(null, e)
+
+                    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                    provider.unbindAll()
+                    val cam =
+                        provider.bindToLifecycle(
+                            lifecycleOwner,
+                            cameraSelector,
+                            preview,
+                            imageCapture!!,
+                            imageAnalysis!!,
+                        )
+                    this.camera = cam
+
+                    // Resolve and store supported/default/selected AE FPS ranges right after
+                    // camera bind.
+                    val selectedRange = resolveMaxAeFpsRange(cam)
+                    aeTargetFpsRange = selectedRange
+                    val availableRangesLabel =
+                        if (availableAeTargetFpsRanges.isEmpty()) {
+                            "<none>"
+                        } else {
+                            availableAeTargetFpsRanges.joinToString(", ") {
+                                "[${it.lower}, ${it.upper}]"
+                            }
+                        }
+                    val selectedRangeLabel =
+                        selectedRange?.let { "[${it.lower}, ${it.upper}]" } ?: "<none>"
+                    Log.i(TAG, "AE FPS ranges available: $availableRangesLabel")
+                    Log.i(TAG, "AE FPS selected max range: $selectedRangeLabel")
+
+                    // Load static characteristics (CCM, ranges) and dump to file
+                    loadStaticColorTransform(cam)
+
+                    // Reset frame counter
+                    frameCount = 0
+                    lastFpsTime = System.nanoTime()
+                    lastFpsFrameCount = 0
+                    currentFps = 0.0
+
+                    // Start FPS reporting timer
+                    startFpsTimer()
+
+                    applyAllCaptureOptions(cam) { error ->
+                        if (error != null) {
+                            Log.e(TAG, "Initial capture options apply failed", error)
+                            callback(null, error)
+                        } else {
+                            callback(gatherResolutionInfo(), null)
+                            pushEvent("status", "camera", "Camera started")
+                            pushSettingsStatus()
+                        }
                     }
-                },
-                ContextCompat.getMainExecutor(context)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Camera start failed", e)
+                    callback(null, e)
+                }
+            },
+            ContextCompat.getMainExecutor(context),
         )
     }
 
@@ -301,6 +354,9 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
         imageCapture = null
         imageAnalysis?.clearAnalyzer()
         imageAnalysis = null
+        defaultAeTargetFpsRange = null
+        availableAeTargetFpsRanges = emptyArray()
+        aeTargetFpsRange = null
 
         cameraExecutor?.let { executor ->
             executor.shutdown()
@@ -338,20 +394,44 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
             val uBytes = ByteArray(uBuf.remaining()).also { uBuf.get(it) }
             val vBytes = ByteArray(vBuf.remaining()).also { vBuf.get(it) }
 
-            val meanY =
-                    NativeStitcher.processFrame(
-                            width = imageProxy.width,
-                            height = imageProxy.height,
-                            yPlane = yBytes,
-                            uPlane = uBytes,
-                            vPlane = vBytes,
-                            yRowStride = yPlane.rowStride,
-                            uvRowStride = uPlane.rowStride,
-                            uvPixelStride = uPlane.pixelStride,
-                    )
+            NativeStitcher.processFrame(
+                width = imageProxy.width,
+                height = imageProxy.height,
+                yPlane = yBytes,
+                uPlane = uBytes,
+                vPlane = vBytes,
+                yRowStride = yPlane.rowStride,
+                uvRowStride = uPlane.rowStride,
+                uvPixelStride = uPlane.pixelStride,
+            )
         } finally {
             imageProxy.close()
         }
+    }
+
+    // ── AE FPS range resolution ─────────────────────────────────────────
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun resolveMaxAeFpsRange(camera: Camera): Range<Int>? {
+        val ranges =
+            Camera2CameraInfo
+                .from(camera.cameraInfo)
+                .getCameraCharacteristic(
+                    CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
+                )
+                ?: return null
+
+        if (ranges.isEmpty()) return null
+        availableAeTargetFpsRanges = ranges
+
+        val maxUpper = ranges.maxOf { it.upper }
+
+        // Prefer fixed max FPS (e.g. [60,60]) if available.
+        val fixedMax = ranges.firstOrNull { it.lower == maxUpper && it.upper == maxUpper }
+        if (fixedMax != null) return fixedMax
+
+        // Otherwise pick the range with highest lower bound among ranges that hit max upper.
+        return ranges.filter { it.upper == maxUpper }.maxByOrNull { it.lower }
     }
 
     // ── FPS timer ───────────────────────────────────────────────────────
@@ -359,24 +439,24 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
     private fun startFpsTimer() {
         stopFpsTimer()
         val timer =
-                object : Runnable {
-                    override fun run() {
-                        val now = System.nanoTime()
-                        val elapsed = (now - lastFpsTime) / 1_000_000_000.0
-                        if (elapsed > 0) {
-                            currentFps = (frameCount - lastFpsFrameCount) / elapsed
-                            lastFpsTime = now
-                            lastFpsFrameCount = frameCount
-                        }
-                        pushEvent(
-                                "status",
-                                "fps",
-                                "Frames: $frameCount | FPS: ${"%.1f".format(currentFps)}",
-                                mapOf("frameCount" to frameCount, "fps" to currentFps)
-                        )
-                        mainHandler.postDelayed(this, 500)
+            object : Runnable {
+                override fun run() {
+                    val now = System.nanoTime()
+                    val elapsed = (now - lastFpsTime) / 1_000_000_000.0
+                    if (elapsed > 0) {
+                        currentFps = (frameCount - lastFpsFrameCount) / elapsed
+                        lastFpsTime = now
+                        lastFpsFrameCount = frameCount
                     }
+                    pushEvent(
+                        "status",
+                        "fps",
+                        "Frames: $frameCount | FPS: ${"%.1f".format(currentFps)}",
+                        mapOf("frameCount" to frameCount, "fps" to currentFps),
+                    )
+                    mainHandler.postDelayed(this, 500)
                 }
+            }
         fpsTimer = timer
         mainHandler.postDelayed(timer, 500)
     }
@@ -388,7 +468,10 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
 
     // ── AF control ──────────────────────────────────────────────────────
 
-    fun setAfEnabled(enabled: Boolean, callback: (Exception?) -> Unit) {
+    fun setAfEnabled(
+        enabled: Boolean,
+        callback: (Exception?) -> Unit,
+    ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         val prev = afEnabled
         afEnabled = enabled
@@ -406,14 +489,18 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
     @OptIn(ExperimentalCamera2Interop::class)
     fun getMinFocusDistance(): Float {
         val cam = camera ?: return 0f
-        return Camera2CameraInfo.from(cam.cameraInfo)
-                .getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
-                ?: 0f
+        return Camera2CameraInfo
+            .from(cam.cameraInfo)
+            .getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+            ?: 0f
     }
 
     fun getCurrentFocusDistance(): Float = capturedFocusDistance ?: 0f
 
-    fun setFocusDistance(distance: Float, callback: (Exception?) -> Unit) {
+    fun setFocusDistance(
+        distance: Float,
+        callback: (Exception?) -> Unit,
+    ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         capturedFocusDistance = distance
         applyAllCaptureOptions(cam, callback)
@@ -421,7 +508,10 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
 
     // ── AE control ──────────────────────────────────────────────────────
 
-    fun setAeEnabled(enabled: Boolean, callback: (Exception?) -> Unit) {
+    fun setAeEnabled(
+        enabled: Boolean,
+        callback: (Exception?) -> Unit,
+    ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         val prev = aeEnabled
         aeEnabled = enabled
@@ -438,7 +528,8 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
 
     fun getExposureOffsetStep(): Double {
         val cam = camera ?: return 0.0
-        return cam.cameraInfo.exposureState.exposureCompensationStep.toDouble()
+        return cam.cameraInfo.exposureState.exposureCompensationStep
+            .toDouble()
     }
 
     fun getExposureOffsetRange(): List<Int> {
@@ -447,19 +538,22 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
         return listOf(range.lower, range.upper)
     }
 
-    fun setExposureOffset(index: Int, callback: (Exception?) -> Unit) {
+    fun setExposureOffset(
+        index: Int,
+        callback: (Exception?) -> Unit,
+    ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         val future = cam.cameraControl.setExposureCompensationIndex(index)
         future.addListener(
-                {
-                    try {
-                        future.get()
-                        callback(null)
-                    } catch (e: Exception) {
-                        callback(e)
-                    }
-                },
-                ContextCompat.getMainExecutor(context)
+            {
+                try {
+                    future.get()
+                    callback(null)
+                } catch (e: Exception) {
+                    callback(e)
+                }
+            },
+            ContextCompat.getMainExecutor(context),
         )
     }
 
@@ -472,7 +566,10 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
     }
 
     /** Set the sensor exposure time (nanoseconds). */
-    fun setExposureTimeNs(ns: Long, callback: (Exception?) -> Unit) {
+    fun setExposureTimeNs(
+        ns: Long,
+        callback: (Exception?) -> Unit,
+    ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         storedExposureTimeNs = ns
         applyAllCaptureOptions(cam, callback)
@@ -485,7 +582,10 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
     }
 
     /** Set the sensor ISO. */
-    fun setIso(iso: Int, callback: (Exception?) -> Unit) {
+    fun setIso(
+        iso: Int,
+        callback: (Exception?) -> Unit,
+    ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         storedSensitivityIso = iso
         applyAllCaptureOptions(cam, callback)
@@ -493,22 +593,36 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
 
     // ── Zoom control ────────────────────────────────────────────────────
 
-    fun getMinZoomRatio(): Float = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1f
-    fun getMaxZoomRatio(): Float = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1f
+    fun getMinZoomRatio(): Float =
+        camera
+            ?.cameraInfo
+            ?.zoomState
+            ?.value
+            ?.minZoomRatio ?: 1f
 
-    fun setZoomRatio(ratio: Float, callback: (Exception?) -> Unit) {
+    fun getMaxZoomRatio(): Float =
+        camera
+            ?.cameraInfo
+            ?.zoomState
+            ?.value
+            ?.maxZoomRatio ?: 1f
+
+    fun setZoomRatio(
+        ratio: Float,
+        callback: (Exception?) -> Unit,
+    ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         val future = cam.cameraControl.setZoomRatio(ratio)
         future.addListener(
-                {
-                    try {
-                        future.get()
-                        callback(null)
-                    } catch (e: Exception) {
-                        callback(e)
-                    }
-                },
-                ContextCompat.getMainExecutor(context)
+            {
+                try {
+                    future.get()
+                    callback(null)
+                } catch (e: Exception) {
+                    callback(e)
+                }
+            },
+            ContextCompat.getMainExecutor(context),
         )
     }
 
@@ -522,7 +636,7 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         if (capturedColorTransform == null || capturedColorGains == null) {
             return callback(
-                    IllegalStateException("No AWB data captured yet — wait for camera to stabilize")
+                IllegalStateException("No AWB data captured yet — wait for camera to stabilize"),
             )
         }
         wbLocked = true
@@ -560,80 +674,80 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
 
     fun saveFrame(callback: (String?, Exception?) -> Unit) {
         val capture =
-                imageCapture ?: return callback(null, IllegalStateException("Camera not ready"))
+            imageCapture ?: return callback(null, IllegalStateException("Camera not ready"))
         val executor =
-                cameraExecutor
-                        ?: return callback(
-                                null,
-                                IllegalStateException("Camera executor not available")
-                        )
+            cameraExecutor
+                ?: return callback(
+                    null,
+                    IllegalStateException("Camera executor not available"),
+                )
 
         capture.takePicture(
-                executor,
-                object : ImageCapture.OnImageCapturedCallback() {
-                    override fun onCaptureSuccess(imageProxy: ImageProxy) {
-                        val w = imageProxy.width
-                        val h = imageProxy.height
-                        Log.i(TAG, "Captured image: ${w}x${h}")
+            executor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                    val w = imageProxy.width
+                    val h = imageProxy.height
+                    Log.i(TAG, "Captured image: ${w}x$h")
 
-                        val buffer = imageProxy.planes[0].buffer
-                        val bytes = ByteArray(buffer.remaining())
-                        buffer.get(bytes)
-                        val rotation = imageProxy.imageInfo.rotationDegrees
-                        imageProxy.close()
+                    val buffer = imageProxy.planes[0].buffer
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
+                    val rotation = imageProxy.imageInfo.rotationDegrees
+                    imageProxy.close()
 
-                        val name =
-                                SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US)
-                                        .format(System.currentTimeMillis())
-                        val contentValues =
-                                ContentValues().apply {
-                                    put(MediaStore.MediaColumns.DISPLAY_NAME, "EVA_$name")
-                                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                        put(
-                                                MediaStore.Images.Media.RELATIVE_PATH,
-                                                "Pictures/EvaWSI"
-                                        )
-                                        put(MediaStore.Images.Media.IS_PENDING, 1)
-                                    }
-                                }
-
-                        try {
-                            val uri =
-                                    context.contentResolver.insert(
-                                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                            contentValues
-                                    )
-                                            ?: throw Exception("MediaStore insert returned null")
-
-                            context.contentResolver.openOutputStream(uri)?.use { os ->
-                                os.write(bytes)
-                                os.flush()
-                            }
-                            writeExifRotation(uri, rotation)
-
+                    val name =
+                        SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US)
+                            .format(System.currentTimeMillis())
+                    val contentValues =
+                        ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, "EVA_$name")
+                            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                val update =
-                                        ContentValues().apply {
-                                            put(MediaStore.Images.Media.IS_PENDING, 0)
-                                        }
-                                context.contentResolver.update(uri, update, null, null)
+                                put(
+                                    MediaStore.Images.Media.RELATIVE_PATH,
+                                    "Pictures/EvaWSI",
+                                )
+                                put(MediaStore.Images.Media.IS_PENDING, 1)
                             }
-
-                            val path = "Pictures/EvaWSI/EVA_$name.jpg"
-                            Log.i(TAG, "Saved ${w}x${h} to $path")
-                            mainHandler.post { callback(path, null) }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Save failed", e)
-                            mainHandler.post { callback(null, e) }
                         }
-                    }
 
-                    override fun onError(exception: ImageCaptureException) {
-                        Log.e(TAG, "Capture failed", exception)
-                        mainHandler.post { callback(null, exception) }
+                    try {
+                        val uri =
+                            context.contentResolver.insert(
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                contentValues,
+                            )
+                                ?: throw Exception("MediaStore insert returned null")
+
+                        context.contentResolver.openOutputStream(uri)?.use { os ->
+                            os.write(bytes)
+                            os.flush()
+                        }
+                        writeExifRotation(uri, rotation)
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val update =
+                                ContentValues().apply {
+                                    put(MediaStore.Images.Media.IS_PENDING, 0)
+                                }
+                            context.contentResolver.update(uri, update, null, null)
+                        }
+
+                        val path = "Pictures/EvaWSI/EVA_$name.jpg"
+                        Log.i(TAG, "Saved ${w}x$h to $path")
+                        mainHandler.post { callback(path, null) }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Save failed", e)
+                        mainHandler.post { callback(null, e) }
                     }
                 }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "Capture failed", exception)
+                    mainHandler.post { callback(null, exception) }
+                }
+            },
         )
     }
 
@@ -664,32 +778,47 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
      * ALL custom options together.
      */
     @OptIn(ExperimentalCamera2Interop::class)
-    private fun applyAllCaptureOptions(cam: Camera, callback: (Exception?) -> Unit) {
+    private fun applyAllCaptureOptions(
+        cam: Camera,
+        callback: (Exception?) -> Unit,
+    ) {
         val camera2Control = Camera2CameraControl.from(cam.cameraControl)
 
         val afMode =
-                if (afEnabled) CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-                else CameraMetadata.CONTROL_AF_MODE_OFF
+            if (afEnabled) {
+                CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            } else {
+                CameraMetadata.CONTROL_AF_MODE_OFF
+            }
 
         val aeMode =
-                if (aeEnabled) CameraMetadata.CONTROL_AE_MODE_ON
-                else CameraMetadata.CONTROL_AE_MODE_OFF
+            if (aeEnabled) {
+                CameraMetadata.CONTROL_AE_MODE_ON
+            } else {
+                CameraMetadata.CONTROL_AE_MODE_OFF
+            }
 
         val builder =
-                CaptureRequestOptions.Builder()
-                        .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, afMode)
-                        .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, aeMode)
+            CaptureRequestOptions
+                .Builder()
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, afMode)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, aeMode)
+
+        // AE FPS range: keep the selected device-supported max range.
+        aeTargetFpsRange?.let {
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+        }
 
         // Manual exposure when AE is off
         if (!aeEnabled) {
-            builder.setCaptureRequestOption(
-                            CaptureRequest.SENSOR_EXPOSURE_TIME,
-                            storedExposureTimeNs
-                    )
-                    .setCaptureRequestOption(
-                            CaptureRequest.SENSOR_SENSITIVITY,
-                            storedSensitivityIso
-                    )
+            builder
+                .setCaptureRequestOption(
+                    CaptureRequest.SENSOR_EXPOSURE_TIME,
+                    storedExposureTimeNs,
+                ).setCaptureRequestOption(
+                    CaptureRequest.SENSOR_SENSITIVITY,
+                    storedSensitivityIso,
+                )
         }
 
         // Manual focus when AF is off
@@ -704,57 +833,53 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
             // Use captured CCM + gains from live AWB
             val ccm = capturedColorTransform ?: staticColorTransform ?: IDENTITY_COLOR_TRANSFORM
             val gains = capturedColorGains ?: RggbChannelVector(1f, 1f, 1f, 1f)
-            builder.setCaptureRequestOption(
-                            CaptureRequest.CONTROL_AWB_MODE,
-                            CameraMetadata.CONTROL_AWB_MODE_OFF
-                    )
-                    .setCaptureRequestOption(
-                            CaptureRequest.COLOR_CORRECTION_MODE,
-                            CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX
-                    )
-                    .setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_TRANSFORM, ccm)
-                    .setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_GAINS, gains)
+            builder
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AWB_MODE,
+                    CameraMetadata.CONTROL_AWB_MODE_OFF,
+                ).setCaptureRequestOption(
+                    CaptureRequest.COLOR_CORRECTION_MODE,
+                    CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
+                ).setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_TRANSFORM, ccm)
+                .setCaptureRequestOption(CaptureRequest.COLOR_CORRECTION_GAINS, gains)
         } else {
             builder.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_AWB_MODE,
-                    CameraMetadata.CONTROL_AWB_MODE_AUTO
+                CaptureRequest.CONTROL_AWB_MODE,
+                CameraMetadata.CONTROL_AWB_MODE_AUTO,
             )
         }
 
         // ISP quality settings — fixed for WSI: minimise post-processing artefacts.
-        builder.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_OFF)
-                .setCaptureRequestOption(
-                        CaptureRequest.NOISE_REDUCTION_MODE,
-                        CameraMetadata.NOISE_REDUCTION_MODE_FAST
-                )
-                .setCaptureRequestOption(
-                        CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
-                        CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_FAST
-                )
-                .setCaptureRequestOption(
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                        CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-                )
-                .setCaptureRequestOption(
-                        CaptureRequest.HOT_PIXEL_MODE,
-                        CameraMetadata.HOT_PIXEL_MODE_FAST
-                )
-                .setCaptureRequestOption(
-                        CaptureRequest.SHADING_MODE,
-                        CameraMetadata.SHADING_MODE_FAST
-                )
+        builder
+            .setCaptureRequestOption(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_OFF)
+            .setCaptureRequestOption(
+                CaptureRequest.NOISE_REDUCTION_MODE,
+                CameraMetadata.NOISE_REDUCTION_MODE_FAST,
+            ).setCaptureRequestOption(
+                CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_FAST,
+            ).setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+            ).setCaptureRequestOption(
+                CaptureRequest.HOT_PIXEL_MODE,
+                CameraMetadata.HOT_PIXEL_MODE_FAST,
+            ).setCaptureRequestOption(
+                CaptureRequest.SHADING_MODE,
+                CameraMetadata.SHADING_MODE_FAST,
+            )
 
         val future = camera2Control.setCaptureRequestOptions(builder.build())
         future.addListener(
-                {
-                    try {
-                        future.get()
-                        callback(null)
-                    } catch (e: Exception) {
-                        callback(e)
-                    }
-                },
-                ContextCompat.getMainExecutor(context)
+            {
+                try {
+                    future.get()
+                    callback(null)
+                } catch (e: Exception) {
+                    callback(e)
+                }
+            },
+            ContextCompat.getMainExecutor(context),
         )
     }
 
@@ -763,20 +888,20 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
     private fun loadStaticColorTransform(cam: Camera) {
         val cam2Info = Camera2CameraInfo.from(cam.cameraInfo)
         staticColorTransform =
-                cam2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
-                        ?: cam2Info.getCameraCharacteristic(
-                                CameraCharacteristics.SENSOR_COLOR_TRANSFORM2
-                        )
+            cam2Info.getCameraCharacteristic(CameraCharacteristics.SENSOR_COLOR_TRANSFORM1)
+                ?: cam2Info.getCameraCharacteristic(
+                    CameraCharacteristics.SENSOR_COLOR_TRANSFORM2,
+                )
 
         // Read device exposure/sensitivity ranges for manual mode
         val exposureRange: Range<Long>? =
-                cam2Info.getCameraCharacteristic(
-                        CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE
-                )
+            cam2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE,
+            )
         val sensitivityRange: Range<Int>? =
-                cam2Info.getCameraCharacteristic(
-                        CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE
-                )
+            cam2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE,
+            )
         exposureTimeRangeNs = exposureRange
         sensitivityIsoRange = sensitivityRange
         storedExposureTimeNs = exposureRange?.clamp(1_000_000L) ?: 1_000_000L
@@ -808,426 +933,426 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
                 pw.println("# Camera2 Characteristics Dump")
                 pw.println("# Generated: $ts")
                 pw.println(
-                        "# Device: ${Build.MANUFACTURER} ${Build.MODEL} (API ${Build.VERSION.SDK_INT})"
+                    "# Device: ${Build.MANUFACTURER} ${Build.MODEL} (API ${Build.VERSION.SDK_INT})",
                 )
                 pw.println()
 
                 // ── Sensor geometry ──────────────────────────────────────
                 section(pw, "SENSOR GEOMETRY")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_ACTIVE_ARRAY_SIZE",
-                        CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_ACTIVE_ARRAY_SIZE",
+                    CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_PIXEL_ARRAY_SIZE",
-                        CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_PIXEL_ARRAY_SIZE",
+                    CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_PHYSICAL_SIZE",
-                        CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_PHYSICAL_SIZE",
+                    CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE",
-                        CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE",
+                    CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE,
                 )
 
                 // ── Exposure / sensitivity ───────────────────────────────
                 section(pw, "EXPOSURE & SENSITIVITY")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_EXPOSURE_TIME_RANGE",
-                        CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_EXPOSURE_TIME_RANGE",
+                    CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_SENSITIVITY_RANGE",
-                        CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_SENSITIVITY_RANGE",
+                    CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_MAX_ANALOG_SENSITIVITY",
-                        CameraCharacteristics.SENSOR_MAX_ANALOG_SENSITIVITY
+                    pw,
+                    cam2Info,
+                    "SENSOR_MAX_ANALOG_SENSITIVITY",
+                    CameraCharacteristics.SENSOR_MAX_ANALOG_SENSITIVITY,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_MAX_FRAME_DURATION",
-                        CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_MAX_FRAME_DURATION",
+                    CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AE_COMPENSATION_RANGE",
-                        CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE
+                    pw,
+                    cam2Info,
+                    "CONTROL_AE_COMPENSATION_RANGE",
+                    CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AE_COMPENSATION_STEP",
-                        CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP
+                    pw,
+                    cam2Info,
+                    "CONTROL_AE_COMPENSATION_STEP",
+                    CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES",
-                        CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+                    pw,
+                    cam2Info,
+                    "CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES",
+                    CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AE_AVAILABLE_MODES",
-                        CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES
+                    pw,
+                    cam2Info,
+                    "CONTROL_AE_AVAILABLE_MODES",
+                    CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AE_LOCK_AVAILABLE",
-                        CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE
+                    pw,
+                    cam2Info,
+                    "CONTROL_AE_LOCK_AVAILABLE",
+                    CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE,
                 )
 
                 // ── Lens optics ──────────────────────────────────────────
                 section(pw, "LENS OPTICS")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_INFO_AVAILABLE_FOCAL_LENGTHS",
-                        CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS
+                    pw,
+                    cam2Info,
+                    "LENS_INFO_AVAILABLE_FOCAL_LENGTHS",
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_INFO_AVAILABLE_APERTURES",
-                        CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES
+                    pw,
+                    cam2Info,
+                    "LENS_INFO_AVAILABLE_APERTURES",
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_INFO_AVAILABLE_FILTER_DENSITIES",
-                        CameraCharacteristics.LENS_INFO_AVAILABLE_FILTER_DENSITIES
+                    pw,
+                    cam2Info,
+                    "LENS_INFO_AVAILABLE_FILTER_DENSITIES",
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_FILTER_DENSITIES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION",
-                        CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION
+                    pw,
+                    cam2Info,
+                    "LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION",
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_INFO_FOCUS_DISTANCE_CALIBRATION",
-                        CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION
+                    pw,
+                    cam2Info,
+                    "LENS_INFO_FOCUS_DISTANCE_CALIBRATION",
+                    CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_INFO_HYPERFOCAL_DISTANCE",
-                        CameraCharacteristics.LENS_INFO_HYPERFOCAL_DISTANCE
+                    pw,
+                    cam2Info,
+                    "LENS_INFO_HYPERFOCAL_DISTANCE",
+                    CameraCharacteristics.LENS_INFO_HYPERFOCAL_DISTANCE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_INFO_MINIMUM_FOCUS_DISTANCE",
-                        CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE
+                    pw,
+                    cam2Info,
+                    "LENS_INFO_MINIMUM_FOCUS_DISTANCE",
+                    CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE,
                 )
                 dumpKey(pw, cam2Info, "LENS_FACING", CameraCharacteristics.LENS_FACING)
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_POSE_REFERENCE",
-                        CameraCharacteristics.LENS_POSE_REFERENCE
+                    pw,
+                    cam2Info,
+                    "LENS_POSE_REFERENCE",
+                    CameraCharacteristics.LENS_POSE_REFERENCE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_INTRINSIC_CALIBRATION",
-                        CameraCharacteristics.LENS_INTRINSIC_CALIBRATION
+                    pw,
+                    cam2Info,
+                    "LENS_INTRINSIC_CALIBRATION",
+                    CameraCharacteristics.LENS_INTRINSIC_CALIBRATION,
                 )
                 dumpKey(pw, cam2Info, "LENS_DISTORTION", CameraCharacteristics.LENS_DISTORTION)
                 @Suppress("DEPRECATION")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "LENS_RADIAL_DISTORTION (deprecated)",
-                        CameraCharacteristics.LENS_RADIAL_DISTORTION
+                    pw,
+                    cam2Info,
+                    "LENS_RADIAL_DISTORTION (deprecated)",
+                    CameraCharacteristics.LENS_RADIAL_DISTORTION,
                 )
 
                 // ── Focus / AF ───────────────────────────────────────────
                 section(pw, "FOCUS / AF")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AF_AVAILABLE_MODES",
-                        CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES
+                    pw,
+                    cam2Info,
+                    "CONTROL_AF_AVAILABLE_MODES",
+                    CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES,
                 )
 
                 // ── AWB / colour ─────────────────────────────────────────
                 section(pw, "AWB / COLOUR")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AWB_AVAILABLE_MODES",
-                        CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES
+                    pw,
+                    cam2Info,
+                    "CONTROL_AWB_AVAILABLE_MODES",
+                    CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AWB_LOCK_AVAILABLE",
-                        CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE
+                    pw,
+                    cam2Info,
+                    "CONTROL_AWB_LOCK_AVAILABLE",
+                    CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_COLOR_TRANSFORM1",
-                        CameraCharacteristics.SENSOR_COLOR_TRANSFORM1
+                    pw,
+                    cam2Info,
+                    "SENSOR_COLOR_TRANSFORM1",
+                    CameraCharacteristics.SENSOR_COLOR_TRANSFORM1,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_COLOR_TRANSFORM2",
-                        CameraCharacteristics.SENSOR_COLOR_TRANSFORM2
+                    pw,
+                    cam2Info,
+                    "SENSOR_COLOR_TRANSFORM2",
+                    CameraCharacteristics.SENSOR_COLOR_TRANSFORM2,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_FORWARD_MATRIX1",
-                        CameraCharacteristics.SENSOR_FORWARD_MATRIX1
+                    pw,
+                    cam2Info,
+                    "SENSOR_FORWARD_MATRIX1",
+                    CameraCharacteristics.SENSOR_FORWARD_MATRIX1,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_FORWARD_MATRIX2",
-                        CameraCharacteristics.SENSOR_FORWARD_MATRIX2
+                    pw,
+                    cam2Info,
+                    "SENSOR_FORWARD_MATRIX2",
+                    CameraCharacteristics.SENSOR_FORWARD_MATRIX2,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_CALIBRATION_TRANSFORM1",
-                        CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM1
+                    pw,
+                    cam2Info,
+                    "SENSOR_CALIBRATION_TRANSFORM1",
+                    CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM1,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_CALIBRATION_TRANSFORM2",
-                        CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM2
+                    pw,
+                    cam2Info,
+                    "SENSOR_CALIBRATION_TRANSFORM2",
+                    CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM2,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_REFERENCE_ILLUMINANT1",
-                        CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1
+                    pw,
+                    cam2Info,
+                    "SENSOR_REFERENCE_ILLUMINANT1",
+                    CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_REFERENCE_ILLUMINANT2",
-                        CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2
+                    pw,
+                    cam2Info,
+                    "SENSOR_REFERENCE_ILLUMINANT2",
+                    CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_BLACK_LEVEL_PATTERN",
-                        CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN
+                    pw,
+                    cam2Info,
+                    "SENSOR_BLACK_LEVEL_PATTERN",
+                    CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_COLOR_FILTER_ARRANGEMENT",
-                        CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_COLOR_FILTER_ARRANGEMENT",
+                    CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SENSOR_INFO_WHITE_LEVEL",
-                        CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL
+                    pw,
+                    cam2Info,
+                    "SENSOR_INFO_WHITE_LEVEL",
+                    CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL,
                 )
 
                 // ── Noise reduction ──────────────────────────────────────
                 section(pw, "NOISE REDUCTION / EDGE / ISP")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES",
-                        CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES
+                    pw,
+                    cam2Info,
+                    "NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES",
+                    CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "EDGE_AVAILABLE_EDGE_MODES",
-                        CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES
+                    pw,
+                    cam2Info,
+                    "EDGE_AVAILABLE_EDGE_MODES",
+                    CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES",
-                        CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES
+                    pw,
+                    cam2Info,
+                    "HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES",
+                    CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES",
-                        CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES
+                    pw,
+                    cam2Info,
+                    "COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES",
+                    CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SHADING_AVAILABLE_MODES",
-                        CameraCharacteristics.SHADING_AVAILABLE_MODES
+                    pw,
+                    cam2Info,
+                    "SHADING_AVAILABLE_MODES",
+                    CameraCharacteristics.SHADING_AVAILABLE_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "TONEMAP_AVAILABLE_TONE_MAP_MODES",
-                        CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES
+                    pw,
+                    cam2Info,
+                    "TONEMAP_AVAILABLE_TONE_MAP_MODES",
+                    CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "TONEMAP_MAX_CURVE_POINTS",
-                        CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS
+                    pw,
+                    cam2Info,
+                    "TONEMAP_MAX_CURVE_POINTS",
+                    CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS,
                 )
 
                 // ── Flash / torch ────────────────────────────────────────
                 section(pw, "FLASH / TORCH")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "FLASH_INFO_AVAILABLE",
-                        CameraCharacteristics.FLASH_INFO_AVAILABLE
+                    pw,
+                    cam2Info,
+                    "FLASH_INFO_AVAILABLE",
+                    CameraCharacteristics.FLASH_INFO_AVAILABLE,
                 )
                 if (Build.VERSION.SDK_INT >= 33) {
                     dumpKey(
-                            pw,
-                            cam2Info,
-                            "FLASH_INFO_STRENGTH_MAXIMUM_LEVEL",
-                            CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL
+                        pw,
+                        cam2Info,
+                        "FLASH_INFO_STRENGTH_MAXIMUM_LEVEL",
+                        CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL,
                     )
                     dumpKey(
-                            pw,
-                            cam2Info,
-                            "FLASH_INFO_STRENGTH_DEFAULT_LEVEL",
-                            CameraCharacteristics.FLASH_INFO_STRENGTH_DEFAULT_LEVEL
+                        pw,
+                        cam2Info,
+                        "FLASH_INFO_STRENGTH_DEFAULT_LEVEL",
+                        CameraCharacteristics.FLASH_INFO_STRENGTH_DEFAULT_LEVEL,
                     )
                 }
 
                 // ── Zoom / crop ──────────────────────────────────────────
                 section(pw, "ZOOM / CROP")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SCALER_AVAILABLE_MAX_DIGITAL_ZOOM",
-                        CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM
+                    pw,
+                    cam2Info,
+                    "SCALER_AVAILABLE_MAX_DIGITAL_ZOOM",
+                    CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "SCALER_CROPPING_TYPE",
-                        CameraCharacteristics.SCALER_CROPPING_TYPE
+                    pw,
+                    cam2Info,
+                    "SCALER_CROPPING_TYPE",
+                    CameraCharacteristics.SCALER_CROPPING_TYPE,
                 )
                 if (Build.VERSION.SDK_INT >= 30) {
                     dumpKey(
-                            pw,
-                            cam2Info,
-                            "CONTROL_ZOOM_RATIO_RANGE",
-                            CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+                        pw,
+                        cam2Info,
+                        "CONTROL_ZOOM_RATIO_RANGE",
+                        CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE,
                     )
                 }
 
                 // ── Video stabilisation ──────────────────────────────────
                 section(pw, "STABILISATION")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES",
-                        CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
+                    pw,
+                    cam2Info,
+                    "CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES",
+                    CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES,
                 )
 
                 // ── Capabilities & hardware level ────────────────────────
                 section(pw, "CAPABILITIES")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "INFO_SUPPORTED_HARDWARE_LEVEL",
-                        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL
+                    pw,
+                    cam2Info,
+                    "INFO_SUPPORTED_HARDWARE_LEVEL",
+                    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "REQUEST_AVAILABLE_CAPABILITIES",
-                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+                    pw,
+                    cam2Info,
+                    "REQUEST_AVAILABLE_CAPABILITIES",
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "REQUEST_MAX_NUM_OUTPUT_RAW",
-                        CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_RAW
+                    pw,
+                    cam2Info,
+                    "REQUEST_MAX_NUM_OUTPUT_RAW",
+                    CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_RAW,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "REQUEST_MAX_NUM_OUTPUT_PROC",
-                        CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_PROC
+                    pw,
+                    cam2Info,
+                    "REQUEST_MAX_NUM_OUTPUT_PROC",
+                    CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_PROC,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "REQUEST_MAX_NUM_OUTPUT_PROC_STALLING",
-                        CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_PROC_STALLING
+                    pw,
+                    cam2Info,
+                    "REQUEST_MAX_NUM_OUTPUT_PROC_STALLING",
+                    CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_PROC_STALLING,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "REQUEST_PARTIAL_RESULT_COUNT",
-                        CameraCharacteristics.REQUEST_PARTIAL_RESULT_COUNT
+                    pw,
+                    cam2Info,
+                    "REQUEST_PARTIAL_RESULT_COUNT",
+                    CameraCharacteristics.REQUEST_PARTIAL_RESULT_COUNT,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "REQUEST_PIPELINE_MAX_DEPTH",
-                        CameraCharacteristics.REQUEST_PIPELINE_MAX_DEPTH
+                    pw,
+                    cam2Info,
+                    "REQUEST_PIPELINE_MAX_DEPTH",
+                    CameraCharacteristics.REQUEST_PIPELINE_MAX_DEPTH,
                 )
 
                 // ── Scene modes ──────────────────────────────────────────
                 section(pw, "SCENE / EFFECT MODES")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AVAILABLE_SCENE_MODES",
-                        CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES
+                    pw,
+                    cam2Info,
+                    "CONTROL_AVAILABLE_SCENE_MODES",
+                    CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_AVAILABLE_EFFECTS",
-                        CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS
+                    pw,
+                    cam2Info,
+                    "CONTROL_AVAILABLE_EFFECTS",
+                    CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_MAX_REGIONS_AF",
-                        CameraCharacteristics.CONTROL_MAX_REGIONS_AF
+                    pw,
+                    cam2Info,
+                    "CONTROL_MAX_REGIONS_AF",
+                    CameraCharacteristics.CONTROL_MAX_REGIONS_AF,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_MAX_REGIONS_AE",
-                        CameraCharacteristics.CONTROL_MAX_REGIONS_AE
+                    pw,
+                    cam2Info,
+                    "CONTROL_MAX_REGIONS_AE",
+                    CameraCharacteristics.CONTROL_MAX_REGIONS_AE,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_MAX_REGIONS_AWB",
-                        CameraCharacteristics.CONTROL_MAX_REGIONS_AWB
+                    pw,
+                    cam2Info,
+                    "CONTROL_MAX_REGIONS_AWB",
+                    CameraCharacteristics.CONTROL_MAX_REGIONS_AWB,
                 )
 
                 // ── Sync / latency ───────────────────────────────────────
@@ -1237,37 +1362,37 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
                 // ── JPEG ─────────────────────────────────────────────────
                 section(pw, "JPEG")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "JPEG_AVAILABLE_THUMBNAIL_SIZES",
-                        CameraCharacteristics.JPEG_AVAILABLE_THUMBNAIL_SIZES
+                    pw,
+                    cam2Info,
+                    "JPEG_AVAILABLE_THUMBNAIL_SIZES",
+                    CameraCharacteristics.JPEG_AVAILABLE_THUMBNAIL_SIZES,
                 )
 
                 // ── Statistics ───────────────────────────────────────────
                 section(pw, "STATISTICS")
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES",
-                        CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES
+                    pw,
+                    cam2Info,
+                    "STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES",
+                    CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "STATISTICS_INFO_MAX_FACE_COUNT",
-                        CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT
+                    pw,
+                    cam2Info,
+                    "STATISTICS_INFO_MAX_FACE_COUNT",
+                    CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "STATISTICS_INFO_AVAILABLE_HOT_PIXEL_MAP_MODES",
-                        CameraCharacteristics.STATISTICS_INFO_AVAILABLE_HOT_PIXEL_MAP_MODES
+                    pw,
+                    cam2Info,
+                    "STATISTICS_INFO_AVAILABLE_HOT_PIXEL_MAP_MODES",
+                    CameraCharacteristics.STATISTICS_INFO_AVAILABLE_HOT_PIXEL_MAP_MODES,
                 )
                 dumpKey(
-                        pw,
-                        cam2Info,
-                        "STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES",
-                        CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES
+                    pw,
+                    cam2Info,
+                    "STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES",
+                    CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES,
                 )
 
                 pw.println()
@@ -1281,7 +1406,10 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
     }
 
     /** Print a section header to the dump file. */
-    private fun section(pw: PrintWriter, title: String) {
+    private fun section(
+        pw: PrintWriter,
+        title: String,
+    ) {
         pw.println()
         pw.println("# ── $title " + "─".repeat(maxOf(0, 60 - title.length)))
     }
@@ -1292,69 +1420,99 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
      */
     @OptIn(ExperimentalCamera2Interop::class)
     private fun <T> dumpKey(
-            pw: PrintWriter,
-            cam2Info: Camera2CameraInfo,
-            label: String,
-            key: CameraCharacteristics.Key<T>
+        pw: PrintWriter,
+        cam2Info: Camera2CameraInfo,
+        label: String,
+        key: CameraCharacteristics.Key<T>,
     ) {
         val value: T? =
-                try {
-                    cam2Info.getCameraCharacteristic(key)
-                } catch (e: Exception) {
-                    null
-                }
+            try {
+                cam2Info.getCameraCharacteristic(key)
+            } catch (e: Exception) {
+                null
+            }
         val formatted =
-                when (value) {
-                    null -> "<not supported>"
-                    is FloatArray -> value.joinToString(", ") { "%.6f".format(it) }
-                    is IntArray -> value.joinToString(", ")
-                    is LongArray -> value.joinToString(", ")
-                    is ByteArray -> value.joinToString(", ") { it.toInt().and(0xFF).toString() }
-                    is Array<*> -> value.joinToString(", ") { formatCharValue(it) }
-                    else -> formatCharValue(value)
-                }
+            when (value) {
+                null -> "<not supported>"
+                is FloatArray -> value.joinToString(", ") { "%.6f".format(it) }
+                is IntArray -> value.joinToString(", ")
+                is LongArray -> value.joinToString(", ")
+                is ByteArray -> value.joinToString(", ") { it.toInt().and(0xFF).toString() }
+                is Array<*> -> value.joinToString(", ") { formatCharValue(it) }
+                else -> formatCharValue(value)
+            }
         pw.println("%-55s %s".format(label, formatted))
     }
 
     /** Pretty-format a single CameraCharacteristics value (not arrays). */
     private fun formatCharValue(v: Any?): String =
-            when (v) {
-                null -> "null"
-                is android.util.Range<*> -> "[${v.lower}, ${v.upper}]"
-                is android.util.Size -> "${v.width}x${v.height}"
-                is android.util.SizeF -> "${v.width}x${v.height}"
-                is android.util.Rational -> "${v.numerator}/${v.denominator}"
-                is android.graphics.Rect -> "(${v.left},${v.top})-(${v.right},${v.bottom})"
-                is android.hardware.camera2.params.BlackLevelPattern ->
-                        "[${v.getOffsetForIndex(0,0)}, ${v.getOffsetForIndex(1,0)}, " +
-                                "${v.getOffsetForIndex(0,1)}, ${v.getOffsetForIndex(1,1)}]"
-                is ColorSpaceTransform ->
-                        buildString {
-                            append("[")
-                            for (row in 0..2) for (col in 0..2) {
-                                val r = android.util.Rational(0, 1)
-                                // ColorSpaceTransform stores 9 rationals in row-major order
-                                append(
-                                        "${v.getElement(col, row).numerator}/${v.getElement(col, row).denominator}"
-                                )
-                                if (!(row == 2 && col == 2)) append(", ")
-                            }
-                            append("]")
-                        }
-                is android.hardware.camera2.params.StreamConfigurationMap ->
-                        "<StreamConfigurationMap — see log>"
-                else -> v.toString()
+        when (v) {
+            null -> {
+                "null"
             }
 
-    /** Write EXIF orientation tag to saved JPEG. */
-    private fun writeExifRotation(uri: android.net.Uri, rotationDegrees: Int) {
-        val exifOrientation =
-                when (rotationDegrees) {
-                    90 -> ExifInterface.ORIENTATION_ROTATE_90
-                    180 -> ExifInterface.ORIENTATION_ROTATE_180
-                    270 -> ExifInterface.ORIENTATION_ROTATE_270
-                    else -> ExifInterface.ORIENTATION_NORMAL
+            is android.util.Range<*> -> {
+                "[${v.lower}, ${v.upper}]"
+            }
+
+            is android.util.Size -> {
+                "${v.width}x${v.height}"
+            }
+
+            is android.util.SizeF -> {
+                "${v.width}x${v.height}"
+            }
+
+            is android.util.Rational -> {
+                "${v.numerator}/${v.denominator}"
+            }
+
+            is android.graphics.Rect -> {
+                "(${v.left},${v.top})-(${v.right},${v.bottom})"
+            }
+
+            is android.hardware.camera2.params.BlackLevelPattern -> {
+                "[${v.getOffsetForIndex(0,0)}, ${v.getOffsetForIndex(1,0)}, " +
+                    "${v.getOffsetForIndex(0,1)}, ${v.getOffsetForIndex(1,1)}]"
+            }
+
+            is ColorSpaceTransform -> {
+                buildString {
+                    append("[")
+                    for (row in 0..2) {
+                        for (col in 0..2) {
+                            // ColorSpaceTransform stores 9 rationals in row-major order
+                            append(
+                                "${v.getElement(col, row).numerator}/${v.getElement(col, row).denominator}",
+                            )
+                            if (!(row == 2 && col == 2)) append(", ")
+                        }
+                    }
+                    append("]")
                 }
+            }
+
+            is android.hardware.camera2.params.StreamConfigurationMap -> {
+                "<StreamConfigurationMap — see log>"
+            }
+
+            else -> {
+                v.toString()
+            }
+        }
+
+    /** Write EXIF orientation tag to saved JPEG. */
+    private fun writeExifRotation(
+        uri: android.net.Uri,
+        rotationDegrees: Int,
+    ) {
+        val exifOrientation =
+            when (rotationDegrees) {
+                90 -> ExifInterface.ORIENTATION_ROTATE_90
+                180 -> ExifInterface.ORIENTATION_ROTATE_180
+                270 -> ExifInterface.ORIENTATION_ROTATE_270
+                else -> ExifInterface.ORIENTATION_NORMAL
+            }
         try {
             context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val exif = ExifInterface(pfd.fileDescriptor)
@@ -1368,10 +1526,10 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
 
     /** Push a typed event to Dart on the main thread. */
     private fun pushEvent(
-            type: String,
-            tag: String,
-            message: String,
-            data: Map<String, Any> = emptyMap()
+        type: String,
+        tag: String,
+        message: String,
+        data: Map<String, Any> = emptyMap(),
     ) {
         val event = mutableMapOf<String, Any>("type" to type, "tag" to tag, "message" to message)
         if (data.isNotEmpty()) event["data"] = data
@@ -1384,10 +1542,10 @@ class CameraManager(private val context: Context, private val lifecycleOwner: Li
         val exposureLabel = if (aeEnabled) "Auto" else "Manual"
         val wbLabel = if (wbLocked) "Locked" else "Auto"
         pushEvent(
-                "status",
-                "cameraSettings",
-                "AF: $afLabel | Exposure: $exposureLabel | WB: $wbLabel",
-                mapOf("afEnabled" to afEnabled, "aeEnabled" to aeEnabled, "wbLocked" to wbLocked)
+            "status",
+            "cameraSettings",
+            "AF: $afLabel | Exposure: $exposureLabel | WB: $wbLabel",
+            mapOf("afEnabled" to afEnabled, "aeEnabled" to aeEnabled, "wbLocked" to wbLocked),
         )
     }
 }

@@ -1,5 +1,103 @@
 # Changelog
 
+## 2026-03-09 (update 33)
+
+### Fix missing @OptIn on resolveMaxAeFpsRange
+
+- Added `@OptIn(ExperimentalCamera2Interop::class)` to `resolveMaxAeFpsRange` in `CameraManager.kt` to match the rest of the file and prevent compilation failure.
+
+## 2026-03-09 (update 32)
+
+### Fix WB lock UI/native desync on failure
+
+- In `_initSettingsQueue` `onError` for `CameraSettingKey.wb`, added a `setState` that flips `wbLocked` back, reverting the optimistic UI update when the native lock/unlock call fails.
+
+## 2026-03-09 (update 31)
+
+### Fix CameraRulerDial spurious resyncs on parent rebuild
+
+- Removed `config` identity check from `didUpdateWidget` in `camera_ruler_dial.dart`; only `initialValue` changes now trigger `_syncToInitialValue()`.
+- Prevents the dial from jumping back to `initialValue` during FPS-event rebuilds (every 500 ms) while the user is dragging.
+
+## 2026-03-09 (update 30)
+
+### AE FPS range initialization and max-range selection
+
+- `CameraManager.kt` now records the default live AE FPS range from the first `TotalCaptureResult` and stores it in `defaultAeTargetFpsRange` for diagnostics.
+- Added storage of all device-supported AE FPS ranges from `CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES` and logs them during camera startup.
+- On camera init, selects the highest supported FPS range (prefers fixed max like `[60,60]`) and applies it through `applyAllCaptureOptions()`.
+- AE FPS cached values are reset on camera start/stop to avoid stale range/default values across rebinds.
+
+### Unified camera settings latest-wins queue
+
+- Replaced per-slider senders in `main.dart` with a unified `CameraSettingsQueue` (`lib/camera/camera_settings_queue.dart`) that serializes native camera writes and keeps only the latest pending value per setting key.
+- Unifies Flutter camera writes to one queue path. All writes now route through queue updates:
+AF, focus, ISO, shutter, zoom, WB.
+- Removed `_focusNeedsAfDisable`; manual focus now always enforces AF-off first inside the queue, then applies the latest focus value, while AF-on drops pending manual focus writes.
+- Routed AF/focus/ISO/shutter/zoom/WB writes through the same queue to avoid piling up and interleaving `applyAllCaptureOptions` calls during rapid UI scrubs.
+
+## 2026-03-09 (update 29)
+
+### Ruler helper readability cleanup
+
+- Extracted `_isNearInteger(...)` in `ruler_picker.dart` and switched major-tick detection to use it for cleaner, self-documenting tick math.
+
+## 2026-03-09 (update 28)
+
+### Slider sender clarity + ruler tick fix
+
+- Renamed sender init helper in `main.dart` to `_initSliderValueSenders()` and clarified focus prerequisite comments for AF-disable-before-manual-focus behavior.
+- Fixed `RulerPicker` major-tick detection (removed a tautological expression), so minor ticks no longer misclassify major positions.
+- Expanded `_RulerPainter.shouldRepaint` to include `step`, `pixelsPerStep`, and `labelBuilder` changes.
+
+## 2026-03-09 (update 27)
+
+### Unified latest-value slider sender
+
+- Added `lib/camera/latest_value_sender.dart`: a small latest-value-wins async sender used to serialize slider-driven native updates.
+- Refactored ISO and shutter handlers to update UI immediately but send native updates through the shared sender, preventing in-flight Camera2 option update churn during scrubs.
+- Replaced the custom focus worker with the same sender while preserving AF-disable-before-focus behavior and keeping AF-specific failure handling in `main.dart`.
+
+## 2026-03-09 (update 26)
+
+### Focus slider AF handoff
+
+- Moving the focus slider now flips the UI into manual focus immediately, disables AF first if needed, and then applies the requested focus distance in sequence.
+- While manual focus commands are in flight, Flutter now keeps only the latest pending slider value instead of queueing every intermediate drag step.
+- While the focus slider is open and AF is enabled, the slider now polls the live autofocus lens distance so its thumb stays aligned with the current focal position.
+- Camera startup now explicitly syncs AF on/off state to native Camera2 so the toolbar and native autofocus mode start in agreement.
+- Simplified the manual-focus handoff worker to a single latest-value slot plus one AF-disable flag, keeping the logic aligned with the KISS goal.
+
+## 2026-03-09 (update 25)
+
+### Camera module extraction
+
+- Created `lib/camera/` module: `camera_state.dart` holds `CameraParam` enum, `CameraValues`, `CameraRanges`, `CameraInfo` (all immutable with `copyWith`), and `CameraCallbacks`; `camera_control.dart` moved from `lib/` into `lib/camera/`.
+- `CameraValues.initialFromRanges()` is the single source of truth for startup defaults; also syncs computed values to native camera immediately after ranging.
+- `CameraControlOverlay` (formerly `FloatingHoverSlider`) drops from 17 constructor params to 4; `CameraSettingsDrawer` drops from 13 to 5; duplicate `CameraParam` enum removed from drawer.
+- fixed bugs
+
+## 2026-03-08 (update 23)
+
+### CameraRulerSlider
+
+- centralized style configuration
+- composed style classes + configurable haptics
+- Camera dial presets extracted from main.dart
+- Simplified dial presets API
+- Extracted the slider and wb action bar into its own widget library
+
+- Added `CameraDialStyle` in `camera_dial_config.dart` to control slider appearance/layout (tick spacing, total height, tick top, icon paddings, fade, tick/label/indicator visuals).
+- Replaced helper functions with simple per-dial objects in `camera_dial_presets.dart`: `IsoDialPreset`, `ShutterDialPreset`, `ZoomDialPreset`, `FocusDialPreset`, each exposing `toModel()`.
+
+## 2026-03-08 (update 22)
+
+### CameraRulerSlider: full file refactor
+
+- Moved all layout constants to file level (`_kTickSpacing`, `_kTotalHeight`, `_kTickTop`, `_kIconPad`, `_kFadeZone`); removed duplicate `tickSpacing` static consts from state and painter classes.
+- Renamed state fields to private (`_velocity`, `_lastDragTime`, `_inertiaTimer`); removed empty `didUpdateWidget` override; renamed drag/snap/inertia methods to `_updateDrag`, `_snapToNearest`, `_startInertia`, `_onDragEnd`.
+- Made `_TicksPainter` and `_LabelsPainter` constructors `const`; added `_LabelsPainter._makeLabel` and `._paint` as proper methods; reworked all inline comments to be short and purposeful.
+
 ## 2026-03-08 (update 21)
 
 ### CameraRulerSlider: Per-tick alpha fade in painter (replaces ShaderMask)
@@ -147,7 +245,6 @@
 - Replaced the overlay/glass UI with a structured layout: 70 px left toolbar (`LeftToolbar`), full-area camera preview/canvas (`CanvasView`), top-right minimap (`MiniMap`), and a 36 px bottom info bar (`BottomInfoBar`), all in a solid Material dark palette with deep blue accent (`kAccent = #2979FF`).
 - Added bottom `CameraSettingsDrawer` that slides up with tabbed ruler pickers (ISO, Shutter, EV, Focus, WB, Zoom). Each tab has an "A" auto toggle: ISO/Shutter share AE on/off, Focus = AF, WB = lock/unlock, EV resets to 0, Zoom resets to min. Custom `RulerPicker` widget draws a horizontal tick-ruler with center orange marker + drag-to-scroll.
 - Extracted `CameraControl` to `lib/camera_control.dart`; color palette to `lib/app_theme.dart`; all new widgets in `lib/widgets/`. Added scan toggle + session timer (`_sessionSeconds`, `_sessionTimer`) and scene-state fields (`_isScanning`, `_showCanvas`, `_settingsDrawerOpen`).
-
 
 ### Gradle settings fix
 

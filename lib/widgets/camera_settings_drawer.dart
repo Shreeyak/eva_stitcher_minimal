@@ -10,73 +10,43 @@
 //
 // This widget contains NO slider or dial.
 //
-// Tapping any chip calls [onHoverParamTap] so the parent (main.dart) can
-// position a floating [CameraRulerSlider] overlay above the camera preview.
+// Tapping any chip calls [onSettingChipTap] so the parent (main.dart) can
+// position a floating [CameraRulerDial] overlay above the camera preview.
 // Tapping the same chip again passes null → collapses the overlay.
 //
-// The [hoverParam] field (owned by the parent) is passed back in to highlight
-// the active chip and to show/hide the A/M toggle for that param.
+// The [activeSetting] field (owned by the parent) is passed back in to highlight
+// the active chip and to show/hide the A/M toggle for that setting.
 
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
+import '../camera/camera_state.dart';
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
 /// Height of the icon-strip row.
 const double _kStripHeight = 52.0;
 
-// ─── CameraParam enum ────────────────────────────────────────────────────────
-
-/// The set of adjustable camera parameters shown in the settings drawer.
-/// Each variant corresponds to one icon tab and one [DialConfig] preset.
-enum CameraParam {
-  iso,
-  shutter,
-  focus,
-  wb,
-  zoom;
-
-  /// Short label shown above the dial and in the icon tab.
-  String get label {
-    switch (this) {
-      case CameraParam.iso:
-        return 'ISO';
-      case CameraParam.shutter:
-        return 'SHUTTER';
-      case CameraParam.focus:
-        return 'FOCUS';
-      case CameraParam.wb:
-        return 'WB';
-      case CameraParam.zoom:
-        return 'ZOOM';
-    }
-  }
-
-  /// True when this parameter has an "Auto / Manual" toggle.
-  bool get hasAutoMode {
-    switch (this) {
-      case CameraParam.focus:
-        return true; // AF on/off
-      case CameraParam.wb:
-        return true; // AWB lock
-      case CameraParam.iso:
-      case CameraParam.shutter:
-      case CameraParam.zoom:
-        return false;
-    }
-  }
-}
+// CameraSettingType enum lives in lib/camera/camera_state.dart.
 
 // ── Icon map ──────────────────────────────────────────────────────────────────
 
-/// Maps each [CameraParam] to a representative Material icon.
-const _paramIcons = {
-  CameraParam.iso: Icons.iso,
-  CameraParam.shutter: Icons.shutter_speed,
-  CameraParam.focus: Icons.center_focus_strong,
-  CameraParam.wb: Icons.wb_auto,
-  CameraParam.zoom: Icons.zoom_in,
+/// Maps each [CameraSettingType] to a representative Material icon.
+const _settingIcons = {
+  CameraSettingType.iso: Icons.iso,
+  CameraSettingType.shutter: Icons.shutter_speed,
+  CameraSettingType.focus: Icons.center_focus_strong,
+  CameraSettingType.wb: Icons.wb_auto,
+  CameraSettingType.zoom: Icons.zoom_in,
+};
+
+/// Short labels shown in the chip row.
+const _settingLabels = {
+  CameraSettingType.iso: 'ISO',
+  CameraSettingType.shutter: 'SHUTTER',
+  CameraSettingType.focus: 'FOCUS',
+  CameraSettingType.wb: 'WB',
+  CameraSettingType.zoom: 'ZOOM',
 };
 
 // ─── CameraSettingsDrawer ─────────────────────────────────────────────────────
@@ -89,115 +59,107 @@ const _paramIcons = {
 ///
 /// ### Data flow
 /// - Parent passes current values → used for chip sub-labels.
-/// - Parent passes [hoverParam] → used to highlight the active chip.
-/// - User taps chip → [onHoverParamTap] fires → parent updates [hoverParam].
+/// - Parent passes [activeSetting] → used to highlight the active chip.
+/// - User taps chip → [onSettingChipTap] fires → parent updates [activeSetting].
 class CameraSettingsDrawer extends StatelessWidget {
   const CameraSettingsDrawer({
     super.key,
     required this.isOpen,
-    this.hoverParam,
-    required this.onHoverParamTap,
-    required this.afEnabled,
-    required this.wbLocked,
-    required this.onToggleAf,
-    required this.onLockWb,
-    required this.onUnlockWb,
-    // ── Current values (for chip sub-labels) ──
-    required this.isoValue,
-    required this.exposureTimeNs,
-    required this.focusDistance,
-    required this.zoomRatio,
+    this.activeSetting,
+    required this.onSettingChipTap,
+    required this.values,
+    required this.callbacks,
   });
 
   /// Whether the strip is shown at all (animates to height 0 when false).
   final bool isOpen;
 
-  /// The currently active "floating" param, or null if the overlay is closed.
+  /// The currently active setting chip, or null if the overlay is closed.
   ///
   /// Controlled entirely by the parent. Used here only to highlight the
   /// corresponding chip and show/hide the A/M toggle button.
-  final CameraParam? hoverParam;
+  final CameraSettingType? activeSetting;
 
   /// Called when the user taps a chip.
   ///
-  /// Passes the tapped [CameraParam], or null if the same chip was tapped
+  /// Passes the tapped [CameraSettingType], or null if the same chip was tapped
   /// again (toggle-off).  The parent must call `setState` to update
-  /// [hoverParam] in response.
-  final ValueChanged<CameraParam?> onHoverParamTap;
+  /// [activeSetting] in response.
+  final ValueChanged<CameraSettingType?> onSettingChipTap;
 
-  // ── Auto-mode flags ───────────────────────────────────────────────────────
+  /// Current camera values — used for chip sub-labels and auto/manual state.
+  final CameraValues values;
 
-  /// AF (auto-focus) on.
-  final bool afEnabled;
-
-  /// WB locked — AWB is overridden with the captured colour-correction matrix.
-  final bool wbLocked;
-
-  final VoidCallback onToggleAf;
-  final VoidCallback onLockWb;
-  final VoidCallback onUnlockWb;
-
-  // ── Current camera values (chip sub-labels only) ──────────────────────────
-
-  final int isoValue;
-  final int exposureTimeNs; // nanoseconds
-  final double focusDistance; // diopters
-  final double zoomRatio;
+  /// Bundled action callbacks for AF toggle and WB lock/unlock.
+  final CameraCallbacks callbacks;
 
   // ── Auto helpers ──────────────────────────────────────────────────────────
 
   /// True when [param] is currently controlled automatically by the camera.
-  bool _isAuto(CameraParam param) {
+  bool _isAuto(CameraSettingType param) {
     switch (param) {
-      case CameraParam.focus:
-        return afEnabled;
-      case CameraParam.wb:
-        return !wbLocked; // "auto" = AWB running (not locked)
-      case CameraParam.iso:
-      case CameraParam.shutter:
-      case CameraParam.zoom:
+      case CameraSettingType.focus:
+        return values.afEnabled;
+      case CameraSettingType.wb:
+        return !values.wbLocked; // "auto" = AWB running (not locked)
+      case CameraSettingType.iso:
+      case CameraSettingType.shutter:
+      case CameraSettingType.zoom:
         return false; // no auto mode for these
     }
   }
 
   /// Fires the correct toggle callback for [param].
-  void _onAutoTap(CameraParam param) {
+  void _onAutoTap(CameraSettingType param) {
     switch (param) {
-      case CameraParam.focus:
-        onToggleAf();
+      case CameraSettingType.focus:
+        callbacks.onToggleAf();
         break;
-      case CameraParam.wb:
-        wbLocked ? onUnlockWb() : onLockWb();
+      case CameraSettingType.wb:
+        values.wbLocked ? callbacks.onUnlockWb() : callbacks.onLockWb();
         break;
-      case CameraParam.iso:
-      case CameraParam.shutter:
-      case CameraParam.zoom:
+      case CameraSettingType.iso:
+      case CameraSettingType.shutter:
+      case CameraSettingType.zoom:
         break; // no-op
+    }
+  }
+
+  /// True when [param] exposes an Auto / Manual toggle in the strip.
+  bool _hasAutoMode(CameraSettingType param) {
+    switch (param) {
+      case CameraSettingType.focus:
+      case CameraSettingType.wb:
+        return true;
+      case CameraSettingType.iso:
+      case CameraSettingType.shutter:
+      case CameraSettingType.zoom:
+        return false;
     }
   }
 
   // ── Chip sub-label ────────────────────────────────────────────────────────
 
   /// Short value string shown beneath the chip icon.
-  String _chipLabel(CameraParam param) {
+  String _chipLabel(CameraSettingType param) {
     switch (param) {
-      case CameraParam.iso:
-        return isoValue.toString();
+      case CameraSettingType.iso:
+        return values.isoValue.toString();
 
-      case CameraParam.shutter:
-        final secs = exposureTimeNs / 1e9;
+      case CameraSettingType.shutter:
+        final secs = values.exposureTimeNs / 1e9;
         if (secs < 1.0) return '1/${(1.0 / secs).round()}';
         return '${secs.toStringAsFixed(1)}s';
 
-      case CameraParam.focus:
-        if (afEnabled) return 'AUTO';
-        return '${focusDistance.toStringAsFixed(1)}D';
+      case CameraSettingType.focus:
+        if (values.afEnabled) return 'AUTO';
+        return '${values.focusDistance.toStringAsFixed(1)}D';
 
-      case CameraParam.wb:
-        return wbLocked ? 'LOCK' : 'AUTO';
+      case CameraSettingType.wb:
+        return values.wbLocked ? 'LOCK' : 'AUTO';
 
-      case CameraParam.zoom:
-        return '${zoomRatio.toStringAsFixed(1)}×';
+      case CameraSettingType.zoom:
+        return '${values.zoomRatio.toStringAsFixed(1)}×';
     }
   }
 
@@ -238,16 +200,16 @@ class CameraSettingsDrawer extends StatelessWidget {
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 6),
                     child: Row(
-                      children: CameraParam.values.map((p) {
+                      children: CameraSettingType.values.map((p) {
                         return _ParamChip(
                           param: p,
-                          icon: _paramIcons[p]!,
+                          icon: _settingIcons[p]!,
                           valueLabel: _chipLabel(p),
-                          isActive: p == hoverParam,
+                          isActive: p == activeSetting,
                           isAuto: _isAuto(p),
                           onTap: () {
                             // Toggle: same chip → collapse overlay; other → open it.
-                            onHoverParamTap(p == hoverParam ? null : p);
+                            onSettingChipTap(p == activeSetting ? null : p);
                           },
                         );
                       }).toList(),
@@ -265,12 +227,12 @@ class CameraSettingsDrawer extends StatelessWidget {
                 ),
 
                 // ── Auto/Manual toggle ─────────────────────────────────────
-                // Only shown when hoverParam has an auto mode.
+                // Only shown when activeSetting has an auto mode.
                 // SizedBox placeholder keeps the strip height stable otherwise.
-                if (hoverParam != null && hoverParam!.hasAutoMode)
+                if (activeSetting != null && _hasAutoMode(activeSetting!))
                   _AutoButton(
-                    isAuto: _isAuto(hoverParam!),
-                    onTap: () => _onAutoTap(hoverParam!),
+                    isAuto: _isAuto(activeSetting!),
+                    onTap: () => _onAutoTap(activeSetting!),
                   )
                 else
                   const SizedBox(width: 56),
@@ -300,7 +262,7 @@ class _ParamChip extends StatelessWidget {
     required this.onTap,
   });
 
-  final CameraParam param;
+  final CameraSettingType param;
   final IconData icon;
   final String valueLabel;
   final bool isActive;
@@ -333,7 +295,7 @@ class _ParamChip extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  param.label,
+                  _settingLabels[param]!,
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
@@ -367,8 +329,7 @@ class _ParamChip extends StatelessWidget {
 /// A / M toggle at the right edge of the strip.
 ///
 /// Pressing switches the hovered parameter between automatic and manual mode.
-/// Only rendered when the hovered param has an auto mode (see
-/// [CameraParam.hasAutoMode]).
+/// Only rendered when the hovered param supports auto/manual switching.
 class _AutoButton extends StatelessWidget {
   const _AutoButton({required this.isAuto, required this.onTap});
 
