@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-09 (update 30)
+
+### Unified camera settings latest-wins queue
+
+- Replaced per-slider senders in `main.dart` with a unified `CameraSettingsQueue` (`lib/camera/camera_settings_queue.dart`) that serializes native camera writes and keeps only the latest pending value per setting key.
+- Removed `_focusNeedsAfDisable`; manual focus now always enforces AF-off first inside the queue, then applies the latest focus value, while AF-on drops pending manual focus writes.
+- Routed AF/focus/ISO/shutter/zoom/WB writes through the same queue to avoid piling up and interleaving `applyAllCaptureOptions` calls during rapid UI scrubs.
+
 ## 2026-03-09 (update 29)
 
 ### Ruler helper readability cleanup
