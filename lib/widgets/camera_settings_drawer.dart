@@ -1,487 +1,281 @@
+// lib/widgets/camera_settings_drawer.dart
+//
+// CameraSettingsDrawer — a slim icon strip pinned to the bottom of the screen.
+//
+// Visual layout:
+//
+//   ┌─ Icon strip (52 px, shown when isOpen=true) ──────────────────────────┐
+//   │  [ISO 400] [1/400] [FOC 2.5D] [WB auto] [1.0×]              [A/M]   │
+//   └───────────────────────────────────────────────────────────────────────┘
+//
+// This widget contains NO slider or dial.
+//
+// Tapping any chip calls [onHoverParamTap] so the parent (main.dart) can
+// position a floating [CameraRulerSlider] overlay above the camera preview.
+// Tapping the same chip again passes null → collapses the overlay.
+//
+// The [hoverParam] field (owned by the parent) is passed back in to highlight
+// the active chip and to show/hide the A/M toggle for that param.
+
 import 'package:flutter/material.dart';
+
 import '../app_theme.dart';
-import 'ruler_picker.dart';
 
-// ── Tab definitions ──────────────────────────────────────────────────────
+// ── Layout constants ──────────────────────────────────────────────────────────
 
-enum _ParamTab { iso, shutter, ev, focus, wb, zoom }
+/// Height of the icon-strip row.
+const double _kStripHeight = 52.0;
 
-const _tabLabels = {
-  _ParamTab.iso: 'ISO',
-  _ParamTab.shutter: 'Shutter',
-  _ParamTab.ev: 'EV',
-  _ParamTab.focus: 'Focus',
-  _ParamTab.wb: 'WB',
-  _ParamTab.zoom: 'Zoom',
+// ─── CameraParam enum ────────────────────────────────────────────────────────
+
+/// The set of adjustable camera parameters shown in the settings drawer.
+/// Each variant corresponds to one icon tab and one [DialConfig] preset.
+enum CameraParam {
+  iso,
+  shutter,
+  focus,
+  wb,
+  zoom;
+
+  /// Short label shown above the dial and in the icon tab.
+  String get label {
+    switch (this) {
+      case CameraParam.iso:
+        return 'ISO';
+      case CameraParam.shutter:
+        return 'SHUTTER';
+      case CameraParam.focus:
+        return 'FOCUS';
+      case CameraParam.wb:
+        return 'WB';
+      case CameraParam.zoom:
+        return 'ZOOM';
+    }
+  }
+
+  /// True when this parameter has an "Auto / Manual" toggle.
+  bool get hasAutoMode {
+    switch (this) {
+      case CameraParam.focus:
+        return true; // AF on/off
+      case CameraParam.wb:
+        return true; // AWB lock
+      case CameraParam.iso:
+      case CameraParam.shutter:
+      case CameraParam.zoom:
+        return false;
+    }
+  }
+}
+
+// ── Icon map ──────────────────────────────────────────────────────────────────
+
+/// Maps each [CameraParam] to a representative Material icon.
+const _paramIcons = {
+  CameraParam.iso: Icons.iso,
+  CameraParam.shutter: Icons.shutter_speed,
+  CameraParam.focus: Icons.center_focus_strong,
+  CameraParam.wb: Icons.wb_auto,
+  CameraParam.zoom: Icons.zoom_in,
 };
 
-const _tabIcons = {
-  _ParamTab.iso: Icons.iso,
-  _ParamTab.shutter: Icons.shutter_speed,
-  _ParamTab.ev: Icons.exposure,
-  _ParamTab.focus: Icons.center_focus_strong,
-  _ParamTab.wb: Icons.wb_auto,
-  _ParamTab.zoom: Icons.zoom_in,
-};
+// ─── CameraSettingsDrawer ─────────────────────────────────────────────────────
 
-// ── Widget ───────────────────────────────────────────────────────────────
-
-/// Animated bottom drawer for camera parameter control.
-/// Height animates between 0 and [_kDrawerHeight] based on [isOpen].
-class CameraSettingsDrawer extends StatefulWidget {
-  final bool isOpen;
-
-  // Camera state
-  final bool aeEnabled;
-  final bool afEnabled;
-  final bool wbLocked;
-  final int isoValue;
-  final List<int> isoRange;
-  final int exposureTimeNs;
-  final List<int> exposureTimeRangeNs;
-  final int exposureOffsetIndex;
-  final List<int> exposureOffsetRange;
-  final double exposureOffsetStep;
-  final double focusDistance;
-  final double minFocusDistance;
-  final double zoomRatio;
-  final double minZoomRatio;
-  final double maxZoomRatio;
-
-  // Callbacks
-  final VoidCallback onToggleAe;
-  final VoidCallback onToggleAf;
-  final VoidCallback onLockWb;
-  final VoidCallback onUnlockWb;
-  final ValueChanged<int> onIsoChanged;
-  final ValueChanged<int> onExposureTimeNsChanged;
-  final ValueChanged<int> onEvIndexChanged;
-  final ValueChanged<double> onFocusChanged;
-  final ValueChanged<double> onZoomChanged;
-
+/// Slim icon-strip drawer for camera parameter selection.
+///
+/// This widget owns NO slider, dial, or expansion panel.  It only renders the
+/// 52-px chip row and an A/M toggle.  All floating overlay logic lives in
+/// main.dart's Stack.
+///
+/// ### Data flow
+/// - Parent passes current values → used for chip sub-labels.
+/// - Parent passes [hoverParam] → used to highlight the active chip.
+/// - User taps chip → [onHoverParamTap] fires → parent updates [hoverParam].
+class CameraSettingsDrawer extends StatelessWidget {
   const CameraSettingsDrawer({
     super.key,
     required this.isOpen,
-    required this.aeEnabled,
+    this.hoverParam,
+    required this.onHoverParamTap,
     required this.afEnabled,
     required this.wbLocked,
-    required this.isoValue,
-    required this.isoRange,
-    required this.exposureTimeNs,
-    required this.exposureTimeRangeNs,
-    required this.exposureOffsetIndex,
-    required this.exposureOffsetRange,
-    required this.exposureOffsetStep,
-    required this.focusDistance,
-    required this.minFocusDistance,
-    required this.zoomRatio,
-    required this.minZoomRatio,
-    required this.maxZoomRatio,
-    required this.onToggleAe,
     required this.onToggleAf,
     required this.onLockWb,
     required this.onUnlockWb,
-    required this.onIsoChanged,
-    required this.onExposureTimeNsChanged,
-    required this.onEvIndexChanged,
-    required this.onFocusChanged,
-    required this.onZoomChanged,
+    // ── Current values (for chip sub-labels) ──
+    required this.isoValue,
+    required this.exposureTimeNs,
+    required this.focusDistance,
+    required this.zoomRatio,
   });
 
-  @override
-  State<CameraSettingsDrawer> createState() => _CameraSettingsDrawerState();
-}
+  /// Whether the strip is shown at all (animates to height 0 when false).
+  final bool isOpen;
 
-class _CameraSettingsDrawerState extends State<CameraSettingsDrawer> {
-  _ParamTab _selectedTab = _ParamTab.iso;
+  /// The currently active "floating" param, or null if the overlay is closed.
+  ///
+  /// Controlled entirely by the parent. Used here only to highlight the
+  /// corresponding chip and show/hide the A/M toggle button.
+  final CameraParam? hoverParam;
 
-  static const double _kDrawerHeight = 138.0;
-  static const double _kTabBarHeight = 40.0;
-  static const double _kControlHeight = 98.0;
+  /// Called when the user taps a chip.
+  ///
+  /// Passes the tapped [CameraParam], or null if the same chip was tapped
+  /// again (toggle-off).  The parent must call `setState` to update
+  /// [hoverParam] in response.
+  final ValueChanged<CameraParam?> onHoverParamTap;
 
-  // ── Auto mode helpers ────────────────────────────────────────────
+  // ── Auto-mode flags ───────────────────────────────────────────────────────
 
-  bool get _isAuto {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-      case _ParamTab.shutter:
-        return widget.aeEnabled;
-      case _ParamTab.ev:
-        return false; // "Auto" for EV means reset to 0
-      case _ParamTab.focus:
-        return widget.afEnabled;
-      case _ParamTab.wb:
-        return !widget.wbLocked; // "Auto" = unlocked AWB
-      case _ParamTab.zoom:
-        return false; // no auto for zoom
+  /// AF (auto-focus) on.
+  final bool afEnabled;
+
+  /// WB locked — AWB is overridden with the captured colour-correction matrix.
+  final bool wbLocked;
+
+  final VoidCallback onToggleAf;
+  final VoidCallback onLockWb;
+  final VoidCallback onUnlockWb;
+
+  // ── Current camera values (chip sub-labels only) ──────────────────────────
+
+  final int isoValue;
+  final int exposureTimeNs; // nanoseconds
+  final double focusDistance; // diopters
+  final double zoomRatio;
+
+  // ── Auto helpers ──────────────────────────────────────────────────────────
+
+  /// True when [param] is currently controlled automatically by the camera.
+  bool _isAuto(CameraParam param) {
+    switch (param) {
+      case CameraParam.focus:
+        return afEnabled;
+      case CameraParam.wb:
+        return !wbLocked; // "auto" = AWB running (not locked)
+      case CameraParam.iso:
+      case CameraParam.shutter:
+      case CameraParam.zoom:
+        return false; // no auto mode for these
     }
   }
 
-  String get _autoLabel {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-      case _ParamTab.shutter:
-        return widget.aeEnabled ? 'A' : 'A';
-      case _ParamTab.ev:
-        return '0';
-      case _ParamTab.focus:
-        return 'A';
-      case _ParamTab.wb:
-        return widget.wbLocked ? 'A' : 'A';
-      case _ParamTab.zoom:
-        return '1x';
+  /// Fires the correct toggle callback for [param].
+  void _onAutoTap(CameraParam param) {
+    switch (param) {
+      case CameraParam.focus:
+        onToggleAf();
+        break;
+      case CameraParam.wb:
+        wbLocked ? onUnlockWb() : onLockWb();
+        break;
+      case CameraParam.iso:
+      case CameraParam.shutter:
+      case CameraParam.zoom:
+        break; // no-op
     }
   }
 
-  void _onAutoTap() {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-      case _ParamTab.shutter:
-        widget.onToggleAe();
-        break;
-      case _ParamTab.ev:
-        widget.onEvIndexChanged(0);
-        break;
-      case _ParamTab.focus:
-        widget.onToggleAf();
-        break;
-      case _ParamTab.wb:
-        widget.wbLocked ? widget.onUnlockWb() : widget.onLockWb();
-        break;
-      case _ParamTab.zoom:
-        widget.onZoomChanged(widget.minZoomRatio);
-        break;
+  // ── Chip sub-label ────────────────────────────────────────────────────────
+
+  /// Short value string shown beneath the chip icon.
+  String _chipLabel(CameraParam param) {
+    switch (param) {
+      case CameraParam.iso:
+        return isoValue.toString();
+
+      case CameraParam.shutter:
+        final secs = exposureTimeNs / 1e9;
+        if (secs < 1.0) return '1/${(1.0 / secs).round()}';
+        return '${secs.toStringAsFixed(1)}s';
+
+      case CameraParam.focus:
+        if (afEnabled) return 'AUTO';
+        return '${focusDistance.toStringAsFixed(1)}D';
+
+      case CameraParam.wb:
+        return wbLocked ? 'LOCK' : 'AUTO';
+
+      case CameraParam.zoom:
+        return '${zoomRatio.toStringAsFixed(1)}×';
     }
   }
 
-  // ── Ruler configuration per tab ──────────────────────────────────
-
-  double get _rulerMin {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-        return widget.isoRange[0].toDouble();
-      case _ParamTab.shutter:
-        return widget.exposureTimeRangeNs[0] / 1e6; // ms
-      case _ParamTab.ev:
-        return widget.exposureOffsetRange.isNotEmpty
-            ? widget.exposureOffsetRange[0].toDouble()
-            : -4.0;
-      case _ParamTab.focus:
-        return 0.0;
-      case _ParamTab.wb:
-        return 0.0;
-      case _ParamTab.zoom:
-        return widget.minZoomRatio;
-    }
-  }
-
-  double get _rulerMax {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-        return widget.isoRange[1].toDouble();
-      case _ParamTab.shutter:
-        return (widget.exposureTimeRangeNs[1] / 1e6).clamp(10.0, 2000.0);
-      case _ParamTab.ev:
-        return widget.exposureOffsetRange.length >= 2
-            ? widget.exposureOffsetRange[1].toDouble()
-            : 4.0;
-      case _ParamTab.focus:
-        return widget.minFocusDistance > 0 ? widget.minFocusDistance : 10.0;
-      case _ParamTab.wb:
-        return 1.0;
-      case _ParamTab.zoom:
-        return widget.maxZoomRatio;
-    }
-  }
-
-  double get _rulerStep {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-        return 100.0;
-      case _ParamTab.shutter:
-        final rangeMs = _rulerMax - _rulerMin;
-        if (rangeMs <= 50) return 2.0;
-        if (rangeMs <= 200) return 10.0;
-        return 50.0;
-      case _ParamTab.ev:
-        return 1.0;
-      case _ParamTab.focus:
-        final range = _rulerMax - _rulerMin;
-        return (range / 8).clamp(0.5, 5.0);
-      case _ParamTab.wb:
-        return 1.0;
-      case _ParamTab.zoom:
-        final range = _rulerMax - _rulerMin;
-        return (range / 6).clamp(0.1, 2.0);
-    }
-  }
-
-  double get _rulerValue {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-        return widget.isoValue.toDouble().clamp(_rulerMin, _rulerMax);
-      case _ParamTab.shutter:
-        return (widget.exposureTimeNs / 1e6).clamp(_rulerMin, _rulerMax);
-      case _ParamTab.ev:
-        return widget.exposureOffsetIndex.toDouble().clamp(
-          _rulerMin,
-          _rulerMax,
-        );
-      case _ParamTab.focus:
-        return widget.focusDistance.clamp(_rulerMin, _rulerMax);
-      case _ParamTab.wb:
-        return 0.0;
-      case _ParamTab.zoom:
-        return widget.zoomRatio.clamp(_rulerMin, _rulerMax);
-    }
-  }
-
-  String _rulerLabel(double v) {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-        return v.toInt().toString();
-      case _ParamTab.shutter:
-        final ms = v;
-        if (ms < 10) return '${ms.toStringAsFixed(1)}ms';
-        return '${ms.toStringAsFixed(0)}ms';
-      case _ParamTab.ev:
-        final stops = v * widget.exposureOffsetStep;
-        return stops >= 0
-            ? '+${stops.toStringAsFixed(1)}'
-            : stops.toStringAsFixed(1);
-      case _ParamTab.focus:
-        return '${v.toStringAsFixed(1)}D';
-      case _ParamTab.wb:
-        return '';
-      case _ParamTab.zoom:
-        return '${v.toStringAsFixed(1)}x';
-    }
-  }
-
-  void _onRulerChanged(double v) {
-    switch (_selectedTab) {
-      case _ParamTab.iso:
-        widget.onIsoChanged(v.round());
-        break;
-      case _ParamTab.shutter:
-        widget.onExposureTimeNsChanged((v * 1e6).round());
-        break;
-      case _ParamTab.ev:
-        widget.onEvIndexChanged(v.round());
-        break;
-      case _ParamTab.focus:
-        widget.onFocusChanged(v);
-        break;
-      case _ParamTab.wb:
-        break;
-      case _ParamTab.zoom:
-        widget.onZoomChanged(v);
-        break;
-    }
-  }
-
-  // ── Build ─────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.0, end: isOpen ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeInOut,
-      height: widget.isOpen ? _kDrawerHeight : 0,
-      child: widget.isOpen
-          ? Container(
-              color: kPanelColor,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Divider(height: 1, thickness: 1, color: kBorderColor),
-                  _buildTabRow(),
-                  const Divider(height: 1, thickness: 1, color: kBorderColor),
-                  SizedBox(height: _kControlHeight, child: _buildControlRow()),
-                ],
-              ),
-            )
-          : const SizedBox.shrink(),
-    );
-  }
-
-  Widget _buildTabRow() {
-    return SizedBox(
-      height: _kTabBarHeight,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Row(
-          children: _ParamTab.values.map((tab) {
-            final isActive = tab == _selectedTab;
-            return GestureDetector(
-              onTap: () => setState(() => _selectedTab = tab),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 7),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: isActive ? kAccent : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: isActive ? kAccent : kBorderColor,
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _tabIcons[tab],
-                      size: 13,
-                      color: isActive ? Colors.white : kTextMuted,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _tabLabels[tab]!,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: isActive
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                        color: isActive ? Colors.white : kTextMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildControlRow() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildAutoButton(),
-        const VerticalDivider(width: 1, thickness: 1, color: kBorderColor),
-        Expanded(child: _buildParamControl()),
-      ],
-    );
-  }
-
-  Widget _buildAutoButton() {
-    final isActiveAuto = _isAuto;
-    return GestureDetector(
-      onTap: _onAutoTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 56,
-        decoration: BoxDecoration(
-          color: isActiveAuto ? kAccentActive : Colors.transparent,
-          border: isActiveAuto
-              ? const Border(right: BorderSide(color: kAccent, width: 1))
-              : null,
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isActiveAuto ? kAccent : kBorderColor,
-              ),
-              child: Center(
-                child: Text(
-                  _autoLabel,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: isActiveAuto ? Colors.white : kTextMuted,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              isActiveAuto ? 'Auto' : 'Manual',
-              style: TextStyle(
-                fontSize: 9,
-                color: isActiveAuto ? kAccent : kTextMuted,
-                letterSpacing: 0.3,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildParamControl() {
-    // WB tab: special lock/unlock UI
-    if (_selectedTab == _ParamTab.wb) {
-      return _buildWbControl();
-    }
-
-    // Show note when in auto mode (ISO/Shutter tabs with AE on)
-    final showAutoNote =
-        (_selectedTab == _ParamTab.iso || _selectedTab == _ParamTab.shutter) &&
-        widget.aeEnabled;
-
-    if (showAutoNote) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.auto_mode, color: kAccent, size: 22),
-            const SizedBox(height: 4),
-            Text(
-              'Auto Exposure Active',
-              style: TextStyle(color: kTextSecondary, fontSize: 11),
-            ),
-            Text(
-              'Press A to switch to manual',
-              style: TextStyle(color: kTextMuted, fontSize: 10),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: RulerPicker(
-        value: _rulerValue,
-        min: _rulerMin,
-        max: _rulerMax,
-        step: _rulerStep,
-        labelBuilder: _rulerLabel,
-        onChanged: _onRulerChanged,
-      ),
-    );
-  }
-
-  Widget _buildWbControl() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _WbButton(
-            label: 'Auto AWB',
-            icon: Icons.wb_auto,
-            isActive: !widget.wbLocked,
-            onTap: widget.wbLocked ? widget.onUnlockWb : null,
+      child: SizedBox(height: _kStripHeight, child: _buildStrip()),
+      builder: (context, factor, child) {
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            heightFactor: factor,
+            child: child,
           ),
-          const SizedBox(width: 16),
-          _WbButton(
-            label: 'Lock WB',
-            icon: Icons.lock,
-            isActive: widget.wbLocked,
-            onTap: !widget.wbLocked ? widget.onLockWb : null,
+        );
+      },
+    );
+  }
+
+  Widget _buildStrip() {
+    return Container(
+      color: kPanelColor,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Divider(height: 1, thickness: 1, color: kBorderColor),
+          Expanded(
+            child: Row(
+              children: [
+                // ── Parameter chips (horizontally scrollable) ─────────────
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Row(
+                      children: CameraParam.values.map((p) {
+                        return _ParamChip(
+                          param: p,
+                          icon: _paramIcons[p]!,
+                          valueLabel: _chipLabel(p),
+                          isActive: p == hoverParam,
+                          isAuto: _isAuto(p),
+                          onTap: () {
+                            // Toggle: same chip → collapse overlay; other → open it.
+                            onHoverParamTap(p == hoverParam ? null : p);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+
+                // ── Vertical separator ─────────────────────────────────────
+                const VerticalDivider(
+                  width: 1,
+                  thickness: 1,
+                  color: kBorderColor,
+                  indent: 8,
+                  endIndent: 8,
+                ),
+
+                // ── Auto/Manual toggle ─────────────────────────────────────
+                // Only shown when hoverParam has an auto mode.
+                // SizedBox placeholder keeps the strip height stable otherwise.
+                if (hoverParam != null && hoverParam!.hasAutoMode)
+                  _AutoButton(
+                    isAuto: _isAuto(hoverParam!),
+                    onTap: () => _onAutoTap(hoverParam!),
+                  )
+                else
+                  const SizedBox(width: 56),
+              ],
+            ),
           ),
         ],
       ),
@@ -489,20 +283,29 @@ class _CameraSettingsDrawerState extends State<CameraSettingsDrawer> {
   }
 }
 
-// ── WB button ────────────────────────────────────────────────────────────
+// ─── _ParamChip ───────────────────────────────────────────────────────────────
 
-class _WbButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool isActive;
-  final VoidCallback? onTap;
-
-  const _WbButton({
-    required this.label,
+/// One tappable icon chip in the settings strip.
+///
+/// Shows the parameter icon + name + current value.
+/// Highlighted in accent colour when [isActive].
+/// Value label is tinted green when [isAuto] (camera is in automatic control).
+class _ParamChip extends StatelessWidget {
+  const _ParamChip({
+    required this.param,
     required this.icon,
+    required this.valueLabel,
     required this.isActive,
-    this.onTap,
+    required this.isAuto,
+    required this.onTap,
   });
+
+  final CameraParam param;
+  final IconData icon;
+  final String valueLabel;
+  final bool isActive;
+  final bool isAuto;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -510,22 +313,107 @@ class _WbButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: isActive ? kAccent : kBorderColor,
-          borderRadius: BorderRadius.circular(8),
+          color: isActive ? kAccent : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isActive ? kAccent : kBorderColor,
+            width: 1,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: isActive ? Colors.white : kTextMuted),
-            const SizedBox(width: 6),
+            Icon(icon, size: 13, color: isActive ? Colors.white : kTextMuted),
+            const SizedBox(width: 4),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  param.label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                    color: isActive ? Colors.white : kTextMuted,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                Text(
+                  valueLabel,
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: isAuto
+                        ? kGreen // green = camera is in automatic control
+                        : isActive
+                        ? Colors.white70
+                        : kTextMuted,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── _AutoButton ──────────────────────────────────────────────────────────────
+
+/// A / M toggle at the right edge of the strip.
+///
+/// Pressing switches the hovered parameter between automatic and manual mode.
+/// Only rendered when the hovered param has an auto mode (see
+/// [CameraParam.hasAutoMode]).
+class _AutoButton extends StatelessWidget {
+  const _AutoButton({required this.isAuto, required this.onTap});
+
+  final bool isAuto;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 56,
+        decoration: BoxDecoration(
+          // Subtle accent background reinforces "auto is on" state.
+          color: isAuto ? kAccentActive : Colors.transparent,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isAuto ? kAccent : kBorderColor,
+              ),
+              child: Center(
+                child: Text(
+                  isAuto ? 'A' : 'M',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 2),
             Text(
-              label,
+              isAuto ? 'Auto' : 'Manual',
               style: TextStyle(
-                fontSize: 12,
-                color: isActive ? Colors.white : kTextMuted,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                fontSize: 8,
+                color: isAuto ? kAccent : kTextMuted,
+                letterSpacing: 0.2,
               ),
             ),
           ],
