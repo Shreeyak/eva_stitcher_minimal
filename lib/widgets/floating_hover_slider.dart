@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
+import '../camera/camera_state.dart';
 import 'camera_ruler_slider/camera_dial_presets.dart';
 import 'camera_ruler_slider/camera_ruler_slider.dart';
-import 'camera_settings_drawer.dart';
 
 /// Floating camera-control overlay shown above the bottom settings strip.
 ///
@@ -13,96 +13,63 @@ class FloatingHoverSlider extends StatelessWidget {
   const FloatingHoverSlider({
     super.key,
     required this.activeParam,
-    required this.wbLocked,
-    required this.isoRange,
-    required this.isoValue,
-    required this.onIsoChanged,
-    required this.exposureTimeRangeNs,
-    required this.exposureTimeNs,
-    required this.onExposureTimeNsChanged,
-    required this.minZoomRatio,
-    required this.maxZoomRatio,
-    required this.currentZoomRatio,
-    required this.onZoomChanged,
-    required this.minFocusDistance,
-    required this.currentFocusDistance,
-    required this.onFocusChanged,
-    required this.onLockWb,
-    required this.onUnlockWb,
+    required this.values,
+    required this.ranges,
+    required this.callbacks,
   });
 
-  final CameraParam? activeParam;
-  final bool wbLocked;
-
-  final List<int> isoRange;
-  final int isoValue;
-  final ValueChanged<int> onIsoChanged;
-
-  final List<int> exposureTimeRangeNs;
-  final int exposureTimeNs;
-  final ValueChanged<int> onExposureTimeNsChanged;
-
-  final double minZoomRatio;
-  final double maxZoomRatio;
-  final double currentZoomRatio;
-  final ValueChanged<double> onZoomChanged;
-
-  final double minFocusDistance;
-  final double currentFocusDistance;
-  final ValueChanged<double> onFocusChanged;
-
-  final VoidCallback onLockWb;
-  final VoidCallback onUnlockWb;
+  final CameraSettingType? activeParam;
+  final CameraValues values;
+  final CameraRanges ranges;
+  final CameraCallbacks callbacks;
 
   @override
   Widget build(BuildContext context) {
     final param = activeParam;
     if (param == null) return const SizedBox.shrink();
-    if (param == CameraParam.wb) {
+    if (param == CameraSettingType.wb) {
       return _HoverWbPanel(
-        wbLocked: wbLocked,
-        onLockWb: onLockWb,
-        onUnlockWb: onUnlockWb,
+        wbLocked: values.wbLocked,
+        onLockWb: callbacks.onLockWb,
+        onUnlockWb: callbacks.onUnlockWb,
       );
     }
 
+    // WB is handled above; remaining params all map to a dial slider.
     final CameraDialModel model;
     switch (param) {
-      case CameraParam.iso:
+      case CameraSettingType.iso:
         model = IsoDialPreset(
-          isoRange: isoRange,
-          isoValue: isoValue,
-          onIsoChanged: onIsoChanged,
+          isoRange: ranges.isoRange,
+          isoValue: values.isoValue,
+          onIsoChanged: callbacks.onIsoChanged,
         ).toModel();
         break;
-      case CameraParam.shutter:
+      case CameraSettingType.shutter:
         model = ShutterDialPreset(
-          exposureTimeRangeNs: exposureTimeRangeNs,
-          exposureTimeNs: exposureTimeNs,
-          onExposureTimeNsChanged: onExposureTimeNsChanged,
+          exposureTimeRangeNs: ranges.exposureTimeRangeNs,
+          exposureTimeNs: values.exposureTimeNs,
+          onExposureTimeNsChanged: callbacks.onExposureTimeNsChanged,
         ).toModel();
         break;
-      case CameraParam.zoom:
+      case CameraSettingType.zoom:
         model = ZoomDialPreset(
-          minZoomRatio: minZoomRatio,
-          maxZoomRatio: maxZoomRatio,
-          currentZoomRatio: currentZoomRatio,
-          onZoomChanged: onZoomChanged,
+          minZoomRatio: ranges.minZoomRatio,
+          maxZoomRatio: ranges.maxZoomRatio,
+          currentZoomRatio: values.zoomRatio,
+          onZoomChanged: callbacks.onZoomChanged,
         ).toModel();
         break;
-      case CameraParam.focus:
+      case CameraSettingType.focus:
         model = FocusDialPreset(
-          minFocusDistance: minFocusDistance,
-          currentFocusDistance: currentFocusDistance,
-          onFocusChanged: onFocusChanged,
+          minFocusDistance: ranges.minFocusDistance,
+          currentFocusDistance: values.focusDistance,
+          onFocusChanged: callbacks.onFocusChanged,
         ).toModel();
         break;
-      case CameraParam.wb:
-        return _HoverWbPanel(
-          wbLocked: wbLocked,
-          onLockWb: onLockWb,
-          onUnlockWb: onUnlockWb,
-        );
+      case CameraSettingType.wb:
+        // Unreachable — WB is handled by the guard at the top of build().
+        return const SizedBox.shrink();
     }
 
     final config = model.config;

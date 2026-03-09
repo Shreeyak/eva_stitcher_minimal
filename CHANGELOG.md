@@ -1,8 +1,17 @@
 # Changelog
 
+## 2026-03-09 (update 25)
+
+### Camera module extraction
+
+- Created `lib/camera/` module: `camera_state.dart` holds `CameraParam` enum, `CameraValues`, `CameraRanges`, `CameraInfo` (all immutable with `copyWith`), and `CameraCallbacks`; `camera_control.dart` moved from `lib/` into `lib/camera/`.
+- `CameraValues.initialFromRanges()` is the single source of truth for startup defaults; also syncs computed values to native camera immediately after ranging.
+- `FloatingHoverSlider` drops from 17 constructor params to 4; `CameraSettingsDrawer` drops from 13 to 5; duplicate `CameraParam` enum removed from drawer.
+- fixed bugs
+
 ## 2026-03-08 (update 23)
 
-### CameraRulerSlider:
+### CameraRulerSlider
 
 - centralized style configuration
 - composed style classes + configurable haptics

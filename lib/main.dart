@@ -5,7 +5,8 @@ import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
-import 'camera_control.dart';
+import 'camera/camera_control.dart';
+import 'camera/camera_state.dart';
 import 'widgets/bottom_info_bar.dart';
 import 'widgets/camera_settings_drawer.dart';
 import 'widgets/canvas_view.dart';
@@ -51,7 +52,7 @@ class EvaApp extends StatelessWidget {
   }
 }
 
-// CameraControl moved to lib/camera_control.dart
+// CameraControl and camera state live in lib/camera/.
 
 // ── Camera screen ───────────────────────────────────────────────────────
 
@@ -67,32 +68,13 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _permissionGranted = false;
   bool _cameraStarted = false;
 
-  // ── Camera controls ────────────────────────────────────────────────
-  bool _afEnabled = true;
-  bool _wbLocked = false;
+  // ── Camera state (grouped) ─────────────────────────────────────────
+  CameraValues _values = const CameraValues();
+  CameraRanges _ranges = const CameraRanges();
+  CameraInfo _info = const CameraInfo();
+  late final CameraCallbacks _callbacks;
 
-  // Focus
-  double _minFocusDistance = 0.0;
-  double _currentFocusDistance = 0.0;
-
-  // Manual sensor exposure + ISO
-  int _exposureTimeNs = 1000000; // 1 ms default
-  List<int> _exposureTimeRangeNs = [1000000, 1000000000];
-  int _isoValue = 200;
-  List<int> _isoRange = [100, 3200];
-
-  // Zoom
-  double _minZoomRatio = 1.0;
-  double _maxZoomRatio = 1.0;
-  double _currentZoomRatio = 1.0;
-
-  // Resolution info (display only)
-  String _captureResolution = '--';
-  String _analysisResolution = '--';
-
-  // ── EventChannel state ────────────────────────────────────────────
-  int _frameCount = 0;
-  double _fps = 0.0;
+  // ── EventChannel ──────────────────────────────────────────────────
   StreamSubscription<Map<dynamic, dynamic>>? _eventSub;
 
   // ── UI state ──────────────────────────────────────────────────────
@@ -103,7 +85,7 @@ class _CameraScreenState extends State<CameraScreen> {
   /// Which "floating" param is currently showing its [CameraRulerSlider]
   /// overlay above the camera preview.  Null = no overlay visible.
   /// Set by [_onHoverParamTap]; cleared when the drawer is closed.
-  CameraParam? _hoverParam;
+  CameraSettingType? _hoverParam;
 
   // ── Session timer ─────────────────────────────────────────────────
   int _sessionSeconds = 0;
@@ -113,6 +95,15 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   void initState() {
     super.initState();
+    _callbacks = CameraCallbacks(
+      onIsoChanged: _onIsoChanged,
+      onExposureTimeNsChanged: _onExposureTimeNsChanged,
+      onFocusChanged: _onFocusChanged,
+      onZoomChanged: _onZoomChanged,
+      onLockWb: _lockWb,
+      onUnlockWb: _unlockWb,
+      onToggleAf: _toggleAf,
+    );
     _initCamera();
   }
 
@@ -136,41 +127,51 @@ class _CameraScreenState extends State<CameraScreen> {
 
       setState(() {
         _cameraStarted = true;
-        _captureResolution = '${cw}x$ch';
-        _analysisResolution = '${aw}x$ah';
+        _info = _info.copyWith(
+          captureResolution: '${cw}x$ch',
+          analysisResolution: '${aw}x$ah',
+        );
       });
 
-      // Fetch device capability ranges in parallel
+      // Fetch device capability ranges — all read-only, safe to parallelize.
       final results = await Future.wait([
         CameraControl.getMinFocusDistance(),
         CameraControl.getMinZoomRatio(),
         CameraControl.getMaxZoomRatio(),
-      ]);
-      final listResults = await Future.wait([
         CameraControl.getExposureTimeRangeNs(),
         CameraControl.getIsoRange(),
       ]);
 
       if (!mounted) return;
-      setState(() {
-        _minFocusDistance = results[0];
-        _currentFocusDistance = (_minFocusDistance / 2).clamp(
-          0.0,
-          _minFocusDistance,
-        );
-        _minZoomRatio = results[1];
-        _maxZoomRatio = results[2];
-        _currentZoomRatio = _minZoomRatio;
 
-        _exposureTimeRangeNs = listResults[0];
-        _exposureTimeNs = _exposureTimeRangeNs[0].clamp(
-          1000000,
-          _exposureTimeRangeNs[1],
-        );
-        _isoRange = listResults[1];
-        _isoValue = _isoRange[0].clamp(200, _isoRange[1]);
+      final ranges = CameraRanges(
+        minFocusDistance: results[0] as double,
+        minZoomRatio: results[1] as double,
+        maxZoomRatio: results[2] as double,
+        exposureTimeRangeNs: results[3] as List<int>,
+        isoRange: results[4] as List<int>,
+      );
+      final initial = CameraValues.initialFromRanges(ranges);
+
+      setState(() {
+        _ranges = ranges;
+        _values = initial;
       });
 
+      // Sync computed initial values to the native camera.
+      //
+      // IMPORTANT: setIso, setExposureTimeNs, and setFocusDistance all call
+      // applyAllCaptureOptions → Camera2CameraControl.setCaptureRequestOptions.
+      // Camera2 cancels any pending setCaptureRequestOptions future when a new
+      // one is submitted, throwing CancellationException on the earlier calls.
+      // Running them in parallel via Future.wait causes every call except the
+      // last to fail with ISO_SET_FAILED / similar errors.  Must be sequential.
+      await CameraControl.setIso(initial.isoValue);
+      await CameraControl.setExposureTimeNs(initial.exposureTimeNs);
+      await CameraControl.setFocusDistance(initial.focusDistance);
+      await CameraControl.setZoomRatio(initial.zoomRatio);
+
+      if (!mounted) return;
       _listenToEvents();
     } catch (e) {
       if (!mounted) return;
@@ -188,8 +189,11 @@ class _CameraScreenState extends State<CameraScreen> {
 
       if (tag == 'fps') {
         setState(() {
-          _frameCount = (data['frameCount'] as num?)?.toInt() ?? _frameCount;
-          _fps = (data['fps'] as num?)?.toDouble() ?? _fps;
+          _info = _info.copyWith(
+            frameCount:
+                (data['frameCount'] as num?)?.toInt() ?? _info.frameCount,
+            fps: (data['fps'] as num?)?.toDouble() ?? _info.fps,
+          );
         });
       } else if (tag == 'cameraSettings') {
         debugPrint('cameraSettings: $message');
@@ -235,37 +239,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
   // ── Camera actions ────────────────────────────────────────────────
 
-  Future<void> _tapToLockWb() async {
-    try {
-      await CameraControl.lockWhiteBalance();
-      if (mounted) setState(() => _wbLocked = true);
-    } catch (e) {
-      _showWarning('WB lock failed: $e');
-    }
-  }
-
-  Future<void> _toggleAf() async {
-    final prev = _afEnabled;
-    if (_afEnabled) {
-      try {
-        final dist = await CameraControl.getCurrentFocusDistance();
-        if (mounted) setState(() => _currentFocusDistance = dist);
-      } catch (_) {}
-    }
-    setState(() => _afEnabled = !_afEnabled);
-    try {
-      await CameraControl.setAfEnabled(_afEnabled);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _afEnabled = prev);
-      _showError('AF toggle failed: $e');
-    }
-  }
-
   Future<void> _lockWb() async {
     try {
       await CameraControl.lockWhiteBalance();
-      if (mounted) setState(() => _wbLocked = true);
+      if (mounted) setState(() => _values = _values.copyWith(wbLocked: true));
     } catch (e) {
       _showWarning('WB lock failed: $e');
     }
@@ -274,35 +251,59 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _unlockWb() async {
     try {
       await CameraControl.unlockWhiteBalance();
-      if (mounted) setState(() => _wbLocked = false);
+      if (mounted) setState(() => _values = _values.copyWith(wbLocked: false));
     } catch (e) {
       _showError('WB unlock failed: $e');
     }
   }
 
+  Future<void> _toggleAf() async {
+    final prev = _values.afEnabled;
+    final newAf = !prev;
+    if (prev) {
+      // Capture the live focus distance before disabling AF so the slider
+      // shows the correct starting position.
+      try {
+        final dist = await CameraControl.getCurrentFocusDistance();
+        if (mounted) {
+          setState(() => _values = _values.copyWith(focusDistance: dist));
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _values = _values.copyWith(afEnabled: newAf));
+    try {
+      await CameraControl.setAfEnabled(newAf);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _values = _values.copyWith(afEnabled: prev));
+      _showError('AF toggle failed: $e');
+    }
+  }
+
   /// Called by [CameraSettingsDrawer] when the user taps a chip in the strip.
   /// Toggling the same chip collapses the floating overlay.
-  void _onHoverParamTap(CameraParam? p) {
+  void _onHoverParamTap(CameraSettingType? p) {
     setState(() => _hoverParam = p);
   }
 
   void _onIsoChanged(int iso) {
-    setState(() => _isoValue = iso);
+    setState(() => _values = _values.copyWith(isoValue: iso));
     CameraControl.setIso(iso);
   }
 
   void _onExposureTimeNsChanged(int ns) {
-    setState(() => _exposureTimeNs = ns);
+    setState(() => _values = _values.copyWith(exposureTimeNs: ns));
     CameraControl.setExposureTimeNs(ns);
   }
 
   void _onFocusChanged(double dist) {
-    setState(() => _currentFocusDistance = dist);
+    setState(() => _values = _values.copyWith(focusDistance: dist));
     CameraControl.setFocusDistance(dist);
   }
 
   void _onZoomChanged(double ratio) {
-    setState(() => _currentZoomRatio = ratio);
+    setState(() => _values = _values.copyWith(zoomRatio: ratio));
     CameraControl.setZoomRatio(ratio);
   }
 
@@ -374,7 +375,7 @@ class _CameraScreenState extends State<CameraScreen> {
                   if (_permissionGranted)
                     Positioned.fill(
                       child: GestureDetector(
-                        onTap: _cameraStarted ? _tapToLockWb : null,
+                        onTap: _cameraStarted ? _lockWb : null,
                         child: _buildCameraPreview(),
                       ),
                     )
@@ -390,10 +391,10 @@ class _CameraScreenState extends State<CameraScreen> {
                   if (_showCanvas) const Positioned.fill(child: CanvasView()),
 
                   // MiniMap — top right
-                  const Positioned(
+                  Positioned(
                     top: 8,
                     right: 8,
-                    child: MiniMap(frameCount: 0),
+                    child: MiniMap(frameCount: _info.frameCount),
                   ),
 
                   // Settings drawer + info bar pinned to bottom
@@ -409,19 +410,12 @@ class _CameraScreenState extends State<CameraScreen> {
                             isOpen: _settingsDrawerOpen,
                             hoverParam: _hoverParam,
                             onHoverParamTap: _onHoverParamTap,
-                            afEnabled: _afEnabled,
-                            wbLocked: _wbLocked,
-                            onToggleAf: _toggleAf,
-                            onLockWb: _lockWb,
-                            onUnlockWb: _unlockWb,
-                            isoValue: _isoValue,
-                            exposureTimeNs: _exposureTimeNs,
-                            focusDistance: _currentFocusDistance,
-                            zoomRatio: _currentZoomRatio,
+                            values: _values,
+                            callbacks: _callbacks,
                           ),
                         BottomInfoBar(
                           isScanning: _isScanning,
-                          frameCount: _frameCount,
+                          frameCount: _info.frameCount,
                           stitchedCount: _stitchedCount,
                           totalTarget: 0,
                           coveragePct: 0.0,
@@ -448,22 +442,9 @@ class _CameraScreenState extends State<CameraScreen> {
                       height: 80,
                       child: FloatingHoverSlider(
                         activeParam: _hoverParam,
-                        wbLocked: _wbLocked,
-                        isoRange: _isoRange,
-                        isoValue: _isoValue,
-                        onIsoChanged: _onIsoChanged,
-                        exposureTimeRangeNs: _exposureTimeRangeNs,
-                        exposureTimeNs: _exposureTimeNs,
-                        onExposureTimeNsChanged: _onExposureTimeNsChanged,
-                        minZoomRatio: _minZoomRatio,
-                        maxZoomRatio: _maxZoomRatio,
-                        currentZoomRatio: _currentZoomRatio,
-                        onZoomChanged: _onZoomChanged,
-                        minFocusDistance: _minFocusDistance,
-                        currentFocusDistance: _currentFocusDistance,
-                        onFocusChanged: _onFocusChanged,
-                        onLockWb: _lockWb,
-                        onUnlockWb: _unlockWb,
+                        values: _values,
+                        ranges: _ranges,
+                        callbacks: _callbacks,
                       ),
                     ),
 
@@ -514,8 +495,8 @@ class _CameraScreenState extends State<CameraScreen> {
           border: Border.all(color: kBorderColor),
         ),
         child: Text(
-          'Cap: $_captureResolution  |  Ana: $_analysisResolution'
-          '  |  ${_fps.toStringAsFixed(1)} fps',
+          'Cap: ${_info.captureResolution}  |  Ana: ${_info.analysisResolution}'
+          '  |  ${_info.fps.toStringAsFixed(1)} fps',
           style: const TextStyle(
             color: kTextMuted,
             fontSize: 9,
