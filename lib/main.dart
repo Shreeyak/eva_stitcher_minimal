@@ -92,10 +92,10 @@ class _CameraScreenState extends State<CameraScreen> {
   /// optimistic flip). Used to revert the UI if the native call fails.
   bool _committedWbLocked = false;
 
-  /// Which "floating" param is currently showing its [CameraRulerDial]
+  /// Which setting chip is currently active, showing its [CameraRulerDial]
   /// overlay above the camera preview.  Null = no overlay visible.
-  /// Set by [_onHoverParamTap]; cleared when the drawer is closed.
-  CameraSettingType? _hoverParam;
+  /// Set by [_onSettingChipTap]; cleared when the drawer is closed.
+  CameraSettingType? _activeSetting;
 
   // ── Session timer ─────────────────────────────────────────────────
   int _sessionSeconds = 0;
@@ -344,9 +344,9 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   /// Called by [CameraSettingsDrawer] when the user taps a chip in the strip.
-  /// Toggling the same chip collapses the floating overlay.
-  void _onHoverParamTap(CameraSettingType? p) {
-    setState(() => _hoverParam = p);
+  /// Tapping the same chip a second time collapses the floating overlay.
+  void _onSettingChipTap(CameraSettingType? p) {
+    setState(() => _activeSetting = p);
     _updateAfFocusSync();
   }
 
@@ -354,7 +354,7 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {
       _settingsDrawerOpen = !_settingsDrawerOpen;
       // Collapse the floating slider when the whole drawer is closed.
-      if (!_settingsDrawerOpen) _hoverParam = null;
+      if (!_settingsDrawerOpen) _activeSetting = null;
     });
     _updateAfFocusSync();
   }
@@ -383,7 +383,7 @@ class _CameraScreenState extends State<CameraScreen> {
   bool get _shouldSyncAfFocusDistance =>
       _cameraStarted &&
       _settingsDrawerOpen &&
-      _hoverParam == CameraSettingType.focus &&
+      _activeSetting == CameraSettingType.focus &&
       _values.afEnabled;
 
   void _updateAfFocusSync() {
@@ -519,8 +519,8 @@ class _CameraScreenState extends State<CameraScreen> {
                         if (_cameraStarted)
                           CameraSettingsDrawer(
                             isOpen: _settingsDrawerOpen,
-                            hoverParam: _hoverParam,
-                            onHoverParamTap: _onHoverParamTap,
+                            activeSetting: _activeSetting,
+                            onSettingChipTap: _onSettingChipTap,
                             values: _values,
                             callbacks: _callbacks,
                           ),
@@ -536,12 +536,12 @@ class _CameraScreenState extends State<CameraScreen> {
                     ),
                   ),
 
-                  // Floating ruler slider — hovers above the icon strip.
-                  // Only shown when the drawer is open and a chip is active.
+                  // Floating ruler slider — shown above the icon strip.
+                  // Only visible when the drawer is open and a chip is active.
                   //
                   // Vertical position: bottom of screen minus info bar (36 px) +
                   // settings strip (52 px) + 12 px breathing room = 100 px.
-                  if (_hoverParam != null &&
+                  if (_activeSetting != null &&
                       _settingsDrawerOpen &&
                       _cameraStarted)
                     Positioned(
@@ -552,7 +552,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       // overlap with widgets pinned to the top of the screen.
                       height: 80,
                       child: CameraControlOverlay(
-                        activeParam: _hoverParam,
+                        activeParam: _activeSetting,
                         values: _values,
                         ranges: _ranges,
                         callbacks: _callbacks,

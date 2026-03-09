@@ -10,12 +10,12 @@
 //
 // This widget contains NO slider or dial.
 //
-// Tapping any chip calls [onHoverParamTap] so the parent (main.dart) can
+// Tapping any chip calls [onSettingChipTap] so the parent (main.dart) can
 // position a floating [CameraRulerDial] overlay above the camera preview.
 // Tapping the same chip again passes null → collapses the overlay.
 //
-// The [hoverParam] field (owned by the parent) is passed back in to highlight
-// the active chip and to show/hide the A/M toggle for that param.
+// The [activeSetting] field (owned by the parent) is passed back in to highlight
+// the active chip and to show/hide the A/M toggle for that setting.
 
 import 'package:flutter/material.dart';
 
@@ -59,14 +59,14 @@ const _paramLabels = {
 ///
 /// ### Data flow
 /// - Parent passes current values → used for chip sub-labels.
-/// - Parent passes [hoverParam] → used to highlight the active chip.
-/// - User taps chip → [onHoverParamTap] fires → parent updates [hoverParam].
+/// - Parent passes [activeSetting] → used to highlight the active chip.
+/// - User taps chip → [onSettingChipTap] fires → parent updates [activeSetting].
 class CameraSettingsDrawer extends StatelessWidget {
   const CameraSettingsDrawer({
     super.key,
     required this.isOpen,
-    this.hoverParam,
-    required this.onHoverParamTap,
+    this.activeSetting,
+    required this.onSettingChipTap,
     required this.values,
     required this.callbacks,
   });
@@ -74,18 +74,18 @@ class CameraSettingsDrawer extends StatelessWidget {
   /// Whether the strip is shown at all (animates to height 0 when false).
   final bool isOpen;
 
-  /// The currently active "floating" param, or null if the overlay is closed.
+  /// The currently active setting chip, or null if the overlay is closed.
   ///
   /// Controlled entirely by the parent. Used here only to highlight the
   /// corresponding chip and show/hide the A/M toggle button.
-  final CameraSettingType? hoverParam;
+  final CameraSettingType? activeSetting;
 
   /// Called when the user taps a chip.
   ///
   /// Passes the tapped [CameraSettingType], or null if the same chip was tapped
   /// again (toggle-off).  The parent must call `setState` to update
-  /// [hoverParam] in response.
-  final ValueChanged<CameraSettingType?> onHoverParamTap;
+  /// [activeSetting] in response.
+  final ValueChanged<CameraSettingType?> onSettingChipTap;
 
   /// Current camera values — used for chip sub-labels and auto/manual state.
   final CameraValues values;
@@ -205,11 +205,11 @@ class CameraSettingsDrawer extends StatelessWidget {
                           param: p,
                           icon: _paramIcons[p]!,
                           valueLabel: _chipLabel(p),
-                          isActive: p == hoverParam,
+                          isActive: p == activeSetting,
                           isAuto: _isAuto(p),
                           onTap: () {
                             // Toggle: same chip → collapse overlay; other → open it.
-                            onHoverParamTap(p == hoverParam ? null : p);
+                            onSettingChipTap(p == activeSetting ? null : p);
                           },
                         );
                       }).toList(),
@@ -227,12 +227,12 @@ class CameraSettingsDrawer extends StatelessWidget {
                 ),
 
                 // ── Auto/Manual toggle ─────────────────────────────────────
-                // Only shown when hoverParam has an auto mode.
+                // Only shown when activeSetting has an auto mode.
                 // SizedBox placeholder keeps the strip height stable otherwise.
-                if (hoverParam != null && _hasAutoMode(hoverParam!))
+                if (activeSetting != null && _hasAutoMode(activeSetting!))
                   _AutoButton(
-                    isAuto: _isAuto(hoverParam!),
-                    onTap: () => _onAutoTap(hoverParam!),
+                    isAuto: _isAuto(activeSetting!),
+                    onTap: () => _onAutoTap(activeSetting!),
                   )
                 else
                   const SizedBox(width: 56),
