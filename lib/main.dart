@@ -11,7 +11,7 @@ import 'camera/camera_state.dart';
 import 'widgets/bottom_info_bar.dart';
 import 'widgets/camera_settings_drawer.dart';
 import 'widgets/canvas_view.dart';
-import 'widgets/floating_hover_slider.dart';
+import 'widgets/camera_control_overlay.dart';
 import 'widgets/left_toolbar.dart';
 import 'widgets/mini_map.dart';
 
@@ -88,7 +88,7 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _showCanvas = false;
   bool _settingsDrawerOpen = false;
 
-  /// Which "floating" param is currently showing its [CameraRulerSlider]
+  /// Which "floating" param is currently showing its [CameraRulerDial]
   /// overlay above the camera preview.  Null = no overlay visible.
   /// Set by [_onHoverParamTap]; cleared when the drawer is closed.
   CameraSettingType? _hoverParam;
@@ -534,7 +534,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       // Cap height so the panel can never grow tall enough to
                       // overlap with widgets pinned to the top of the screen.
                       height: 80,
-                      child: FloatingHoverSlider(
+                      child: CameraControlOverlay(
                         activeParam: _hoverParam,
                         values: _values,
                         ranges: _ranges,

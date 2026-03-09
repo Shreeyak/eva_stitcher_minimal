@@ -1,14 +1,11 @@
-/// Horizontal camera ruler slider — ISO / shutter / zoom / focus style.
+/// Horizontal camera ruler dial — ISO / shutter / zoom / focus style.
 ///
 /// Features: tick snapping, haptic feedback, edge fade, optional inertia,
 /// logarithmic value mapping, end icons.
 library;
 
 import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
 import 'camera_dial_config.dart';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -33,8 +30,8 @@ double _edgeFade(double x, double viewportWidth, CameraDialStyle style) {
 
 // ── Widget ────────────────────────────────────────────────────────────────────
 
-/// Horizontal ruler slider styled after iOS camera controls.
-class CameraRulerSlider extends StatefulWidget {
+/// Horizontal ruler dial styled after iOS camera controls.
+class CameraRulerDial extends StatefulWidget {
   final CameraDialConfig config;
   final double initialValue;
   final ValueChanged<double> onChanged;
@@ -50,7 +47,7 @@ class CameraRulerSlider extends StatefulWidget {
   final Widget? leftIcon;
   final Widget? rightIcon;
 
-  const CameraRulerSlider({
+  const CameraRulerDial({
     super.key,
     required this.config,
     required this.initialValue,
@@ -62,10 +59,10 @@ class CameraRulerSlider extends StatefulWidget {
   });
 
   @override
-  State<CameraRulerSlider> createState() => _CameraRulerSliderState();
+  State<CameraRulerDial> createState() => _CameraRulerDialState();
 }
 
-class _CameraRulerSliderState extends State<CameraRulerSlider> {
+class _CameraRulerDialState extends State<CameraRulerDial> {
   /// Scroll position as 0..1 fraction. Fractional during drag, snapped at rest.
   double _visualPercent = 0;
 
@@ -86,7 +83,7 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   }
 
   @override
-  void didUpdateWidget(covariant CameraRulerSlider oldWidget) {
+  void didUpdateWidget(covariant CameraRulerDial oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initialValue != widget.initialValue ||
         oldWidget.config != widget.config) {

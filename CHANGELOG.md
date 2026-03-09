@@ -12,6 +12,8 @@
 ### Unified camera settings latest-wins queue
 
 - Replaced per-slider senders in `main.dart` with a unified `CameraSettingsQueue` (`lib/camera/camera_settings_queue.dart`) that serializes native camera writes and keeps only the latest pending value per setting key.
+- Unifies Flutter camera writes to one queue path. All writes now route through queue updates:
+AF, focus, ISO, shutter, zoom, WB.
 - Removed `_focusNeedsAfDisable`; manual focus now always enforces AF-off first inside the queue, then applies the latest focus value, while AF-on drops pending manual focus writes.
 - Routed AF/focus/ISO/shutter/zoom/WB writes through the same queue to avoid piling up and interleaving `applyAllCaptureOptions` calls during rapid UI scrubs.
 
@@ -53,7 +55,7 @@
 
 - Created `lib/camera/` module: `camera_state.dart` holds `CameraParam` enum, `CameraValues`, `CameraRanges`, `CameraInfo` (all immutable with `copyWith`), and `CameraCallbacks`; `camera_control.dart` moved from `lib/` into `lib/camera/`.
 - `CameraValues.initialFromRanges()` is the single source of truth for startup defaults; also syncs computed values to native camera immediately after ranging.
-- `FloatingHoverSlider` drops from 17 constructor params to 4; `CameraSettingsDrawer` drops from 13 to 5; duplicate `CameraParam` enum removed from drawer.
+- `CameraControlOverlay` (formerly `FloatingHoverSlider`) drops from 17 constructor params to 4; `CameraSettingsDrawer` drops from 13 to 5; duplicate `CameraParam` enum removed from drawer.
 - fixed bugs
 
 ## 2026-03-08 (update 23)

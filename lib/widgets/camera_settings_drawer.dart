@@ -11,7 +11,7 @@
 // This widget contains NO slider or dial.
 //
 // Tapping any chip calls [onHoverParamTap] so the parent (main.dart) can
-// position a floating [CameraRulerSlider] overlay above the camera preview.
+// position a floating [CameraRulerDial] overlay above the camera preview.
 // Tapping the same chip again passes null → collapses the overlay.
 //
 // The [hoverParam] field (owned by the parent) is passed back in to highlight

@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 /// Formatter for label rendering.
 typedef DialFormatter = String Function(double value);
 
-/// Visual and layout style for [CameraRulerSlider].
+/// Visual and layout style for [CameraRulerDial].
 ///
 /// Keep value/stop math in [CameraDialConfig], and appearance knobs here so
 /// apps can tune one place for slider look-and-feel.

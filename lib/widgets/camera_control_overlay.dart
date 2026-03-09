@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 import '../camera/camera_state.dart';
-import 'camera_ruler_slider/camera_dial_presets.dart';
-import 'camera_ruler_slider/camera_ruler_slider.dart';
+import 'camera_ruler_dial/camera_dial_presets.dart';
+import 'camera_ruler_dial/camera_ruler_dial.dart';
 
 /// Floating camera-control overlay shown above the bottom settings strip.
 ///
-/// Renders either a [CameraRulerSlider] for numeric parameters or a compact
+/// Renders either a [CameraRulerDial] for numeric parameters or a compact
 /// WB action panel for white-balance lock/unlock.
-class FloatingHoverSlider extends StatelessWidget {
-  const FloatingHoverSlider({
+class CameraControlOverlay extends StatelessWidget {
+  const CameraControlOverlay({
     super.key,
     required this.activeParam,
     required this.values,
@@ -80,7 +80,7 @@ class FloatingHoverSlider extends StatelessWidget {
           borderRadius: BorderRadius.circular(100),
           child: ColoredBox(
             color: const Color(0xFF1A1A1A).withValues(alpha: 0.82),
-            child: CameraRulerSlider(
+            child: CameraRulerDial(
               key: ValueKey(param),
               config: config,
               initialValue: model.initialValue,
