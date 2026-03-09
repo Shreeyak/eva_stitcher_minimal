@@ -552,7 +552,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       // overlap with widgets pinned to the top of the screen.
                       height: 80,
                       child: CameraControlOverlay(
-                        activeParam: _activeSetting,
+                        activeSetting: _activeSetting,
                         values: _values,
                         ranges: _ranges,
                         callbacks: _callbacks,

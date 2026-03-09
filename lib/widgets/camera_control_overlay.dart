@@ -12,23 +12,23 @@ import 'camera_ruler_dial/camera_ruler_dial.dart';
 class CameraControlOverlay extends StatelessWidget {
   const CameraControlOverlay({
     super.key,
-    required this.activeParam,
+    required this.activeSetting,
     required this.values,
     required this.ranges,
     required this.callbacks,
   });
 
-  final CameraSettingType? activeParam;
+  final CameraSettingType? activeSetting;
   final CameraValues values;
   final CameraRanges ranges;
   final CameraCallbacks callbacks;
 
   @override
   Widget build(BuildContext context) {
-    final param = activeParam;
+    final param = activeSetting;
     if (param == null) return const SizedBox.shrink();
     if (param == CameraSettingType.wb) {
-      return _HoverWbPanel(
+      return _WbControlPanel(
         wbLocked: values.wbLocked,
         onLockWb: callbacks.onLockWb,
         onUnlockWb: callbacks.onUnlockWb,
@@ -104,8 +104,8 @@ class CameraControlOverlay extends StatelessWidget {
   }
 }
 
-class _HoverWbPanel extends StatelessWidget {
-  const _HoverWbPanel({
+class _WbControlPanel extends StatelessWidget {
+  const _WbControlPanel({
     required this.wbLocked,
     required this.onLockWb,
     required this.onUnlockWb,
@@ -128,14 +128,14 @@ class _HoverWbPanel extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _HoverWbButton(
+          _WbActionButton(
             label: 'Auto AWB',
             icon: Icons.wb_auto,
             isActive: !wbLocked,
             onTap: wbLocked ? onUnlockWb : null,
           ),
           const SizedBox(width: 16),
-          _HoverWbButton(
+          _WbActionButton(
             label: 'Lock WB',
             icon: Icons.lock,
             isActive: wbLocked,
@@ -147,8 +147,8 @@ class _HoverWbPanel extends StatelessWidget {
   }
 }
 
-class _HoverWbButton extends StatelessWidget {
-  const _HoverWbButton({
+class _WbActionButton extends StatelessWidget {
+  const _WbActionButton({
     required this.label,
     required this.icon,
     required this.isActive,

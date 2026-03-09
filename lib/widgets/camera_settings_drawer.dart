@@ -32,7 +32,7 @@ const double _kStripHeight = 52.0;
 // ── Icon map ──────────────────────────────────────────────────────────────────
 
 /// Maps each [CameraSettingType] to a representative Material icon.
-const _paramIcons = {
+const _settingIcons = {
   CameraSettingType.iso: Icons.iso,
   CameraSettingType.shutter: Icons.shutter_speed,
   CameraSettingType.focus: Icons.center_focus_strong,
@@ -41,7 +41,7 @@ const _paramIcons = {
 };
 
 /// Short labels shown in the chip row.
-const _paramLabels = {
+const _settingLabels = {
   CameraSettingType.iso: 'ISO',
   CameraSettingType.shutter: 'SHUTTER',
   CameraSettingType.focus: 'FOCUS',
@@ -203,7 +203,7 @@ class CameraSettingsDrawer extends StatelessWidget {
                       children: CameraSettingType.values.map((p) {
                         return _ParamChip(
                           param: p,
-                          icon: _paramIcons[p]!,
+                          icon: _settingIcons[p]!,
                           valueLabel: _chipLabel(p),
                           isActive: p == activeSetting,
                           isAuto: _isAuto(p),
@@ -295,7 +295,7 @@ class _ParamChip extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _paramLabels[param]!,
+                  _settingLabels[param]!,
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
