@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-09 (update 26)
+
+### Focus slider AF handoff
+
+- Moving the focus slider now flips the UI into manual focus immediately, disables AF first if needed, and then applies the requested focus distance in sequence.
+- While manual focus commands are in flight, Flutter now keeps only the latest pending slider value instead of queueing every intermediate drag step.
+- While the focus slider is open and AF is enabled, the slider now polls the live autofocus lens distance so its thumb stays aligned with the current focal position.
+- Camera startup now explicitly syncs AF on/off state to native Camera2 so the toolbar and native autofocus mode start in agreement.
+- Simplified the manual-focus handoff worker to a single latest-value slot plus one AF-disable flag, keeping the logic aligned with the KISS goal.
+
 ## 2026-03-09 (update 25)
 
 ### Camera module extraction

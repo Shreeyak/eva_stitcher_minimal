@@ -82,6 +82,19 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   @override
   void initState() {
     super.initState();
+    _syncToInitialValue();
+  }
+
+  @override
+  void didUpdateWidget(covariant CameraRulerSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialValue != widget.initialValue ||
+        oldWidget.config != widget.config) {
+      _syncToInitialValue();
+    }
+  }
+
+  void _syncToInitialValue() {
     final idx = widget.config.stops.indexOf(widget.initialValue);
     final clampedIdx = (idx < 0 ? 0 : idx).clamp(
       0,

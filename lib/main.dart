@@ -77,6 +77,14 @@ class _CameraScreenState extends State<CameraScreen> {
   // ── EventChannel ──────────────────────────────────────────────────
   StreamSubscription<Map<dynamic, dynamic>>? _eventSub;
 
+  // ── Camera command sequencing ─────────────────────────────────────
+  double? _pendingFocusDistance;
+  double _lastAppliedFocusDistance = 0.0;
+  bool _focusUpdateRunning = false;
+  bool _focusNeedsAfDisable = false;
+  Timer? _afFocusSyncTimer;
+  bool _afFocusSyncInFlight = false;
+
   // ── UI state ──────────────────────────────────────────────────────
   bool _isScanning = false;
   bool _showCanvas = false;
@@ -157,6 +165,7 @@ class _CameraScreenState extends State<CameraScreen> {
         _ranges = ranges;
         _values = initial;
       });
+      _lastAppliedFocusDistance = initial.focusDistance;
 
       // Sync computed initial values to the native camera.
       //
@@ -166,6 +175,7 @@ class _CameraScreenState extends State<CameraScreen> {
       // one is submitted, throwing CancellationException on the earlier calls.
       // Running them in parallel via Future.wait causes every call except the
       // last to fail with ISO_SET_FAILED / similar errors.  Must be sequential.
+      await CameraControl.setAfEnabled(initial.afEnabled);
       await CameraControl.setIso(initial.isoValue);
       await CameraControl.setExposureTimeNs(initial.exposureTimeNs);
       await CameraControl.setFocusDistance(initial.focusDistance);
@@ -209,6 +219,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void dispose() {
     _eventSub?.cancel();
     _sessionTimer?.cancel();
+    _afFocusSyncTimer?.cancel();
     CameraControl.stopCamera();
     super.dispose();
   }
@@ -274,9 +285,17 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() => _values = _values.copyWith(afEnabled: newAf));
     try {
       await CameraControl.setAfEnabled(newAf);
+      if (newAf) {
+        _pendingFocusDistance = null;
+        _focusNeedsAfDisable = false;
+      } else {
+        _lastAppliedFocusDistance = _values.focusDistance;
+      }
+      _updateAfFocusSync();
     } catch (e) {
       if (!mounted) return;
       setState(() => _values = _values.copyWith(afEnabled: prev));
+      _updateAfFocusSync();
       _showError('AF toggle failed: $e');
     }
   }
@@ -285,6 +304,16 @@ class _CameraScreenState extends State<CameraScreen> {
   /// Toggling the same chip collapses the floating overlay.
   void _onHoverParamTap(CameraSettingType? p) {
     setState(() => _hoverParam = p);
+    _updateAfFocusSync();
+  }
+
+  void _toggleSettingsDrawer() {
+    setState(() {
+      _settingsDrawerOpen = !_settingsDrawerOpen;
+      // Collapse the floating slider when the whole drawer is closed.
+      if (!_settingsDrawerOpen) _hoverParam = null;
+    });
+    _updateAfFocusSync();
   }
 
   void _onIsoChanged(int iso) {
@@ -298,8 +327,111 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   void _onFocusChanged(double dist) {
-    setState(() => _values = _values.copyWith(focusDistance: dist));
-    CameraControl.setFocusDistance(dist);
+    final wasAfEnabled = _values.afEnabled;
+
+    if (mounted) {
+      setState(() {
+        _values = _values.copyWith(focusDistance: dist, afEnabled: false);
+      });
+    }
+
+    _updateAfFocusSync();
+
+    _pendingFocusDistance = dist;
+    if (wasAfEnabled) {
+      _focusNeedsAfDisable = true;
+    }
+    if (!_focusUpdateRunning) _processPendingFocusUpdates();
+  }
+
+  Future<void> _processPendingFocusUpdates() async {
+    _focusUpdateRunning = true;
+    try {
+      while (_focusNeedsAfDisable || _pendingFocusDistance != null) {
+        if (_focusNeedsAfDisable) {
+          try {
+            await CameraControl.setAfEnabled(false);
+            _focusNeedsAfDisable = false;
+          } catch (e) {
+            _pendingFocusDistance = null;
+            _focusNeedsAfDisable = false;
+            if (!mounted) return;
+            setState(() {
+              _values = _values.copyWith(
+                focusDistance: _lastAppliedFocusDistance,
+                afEnabled: true,
+              );
+            });
+            _showError('AF disable failed: $e');
+            return;
+          }
+        }
+
+        final dist = _pendingFocusDistance;
+        if (dist == null) continue;
+        _pendingFocusDistance = null;
+
+        try {
+          await CameraControl.setFocusDistance(dist);
+          _lastAppliedFocusDistance = dist;
+        } catch (e) {
+          _pendingFocusDistance = null;
+          if (!mounted) return;
+          setState(() {
+            _values = _values.copyWith(
+              focusDistance: _lastAppliedFocusDistance,
+            );
+          });
+          _showError('Focus update failed: $e');
+          return;
+        }
+      }
+    } finally {
+      _focusUpdateRunning = false;
+    }
+
+    if ((_focusNeedsAfDisable || _pendingFocusDistance != null) &&
+        !_focusUpdateRunning) {
+      _processPendingFocusUpdates();
+    }
+  }
+
+  bool get _shouldSyncAfFocusDistance =>
+      _cameraStarted &&
+      _settingsDrawerOpen &&
+      _hoverParam == CameraSettingType.focus &&
+      _values.afEnabled;
+
+  void _updateAfFocusSync() {
+    if (!_shouldSyncAfFocusDistance) {
+      _afFocusSyncTimer?.cancel();
+      _afFocusSyncTimer = null;
+      return;
+    }
+
+    if (_afFocusSyncTimer != null) return;
+
+    _syncCurrentAfFocusDistance();
+    _afFocusSyncTimer = Timer.periodic(
+      const Duration(milliseconds: 200),
+      (_) => _syncCurrentAfFocusDistance(),
+    );
+  }
+
+  Future<void> _syncCurrentAfFocusDistance() async {
+    if (_afFocusSyncInFlight || !_shouldSyncAfFocusDistance) return;
+    _afFocusSyncInFlight = true;
+    try {
+      final dist = await CameraControl.getCurrentFocusDistance();
+      if (!mounted || !_shouldSyncAfFocusDistance) return;
+      if ((dist - _values.focusDistance).abs() < 0.001) return;
+      setState(() => _values = _values.copyWith(focusDistance: dist));
+      _lastAppliedFocusDistance = dist;
+    } catch (_) {
+      // Best-effort UI sync only — ignore transient read failures.
+    } finally {
+      _afFocusSyncInFlight = false;
+    }
   }
 
   void _onZoomChanged(double ratio) {
@@ -358,11 +490,7 @@ class _CameraScreenState extends State<CameraScreen> {
               canExport: false,
               onToggleScan: _toggleScan,
               onToggleCanvas: () => setState(() => _showCanvas = !_showCanvas),
-              onToggleSettings: () => setState(() {
-                _settingsDrawerOpen = !_settingsDrawerOpen;
-                // Collapse the floating slider when the whole drawer is closed.
-                if (!_settingsDrawerOpen) _hoverParam = null;
-              }),
+              onToggleSettings: _toggleSettingsDrawer,
               onReset: _onReset,
               onExport: _onExport,
             ),
