@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Formatter for label rendering.
 typedef DialFormatter = String Function(double value);
@@ -133,7 +134,8 @@ class CameraDialIndicatorStyle {
   });
 }
 
-enum CameraDialHaptics { off, light, medium, heavy, vibrate }
+/// Callback type for haptic feedback on tick-crossing.
+typedef CameraDialHapticCallback = Future<void> Function();
 
 /// Configuration for a camera dial (ISO / shutter / zoom / focus).
 ///
@@ -159,8 +161,15 @@ class CameraDialConfig {
   /// Appearance/layout style for the slider UI.
   final CameraDialStyle style;
 
-  /// Haptic behavior when crossing ticks.
-  final CameraDialHaptics haptics;
+  /// Haptic callback when crossing ticks.
+  ///
+  /// Example values at call-site:
+  /// - `HapticFeedback.lightImpact`
+  /// - `HapticFeedback.mediumImpact`
+  /// - `HapticFeedback.heavyImpact`
+  /// - `HapticFeedback.vibrate`
+  /// - `null` (disabled)
+  final CameraDialHapticCallback? hapticFeedback;
 
   const CameraDialConfig({
     required this.stops,
@@ -170,7 +179,7 @@ class CameraDialConfig {
     this.rightIcon = Icons.add,
     this.iconSize = 20,
     this.style = const CameraDialStyle(),
-    this.haptics = CameraDialHaptics.heavy,
+    this.hapticFeedback = HapticFeedback.heavyImpact,
   });
 
   // ── Instance methods ──────────────────────────────────────────────────────

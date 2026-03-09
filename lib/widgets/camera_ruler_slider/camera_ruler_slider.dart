@@ -130,19 +130,8 @@ class _CameraRulerSliderState extends State<CameraRulerSlider> {
   }
 
   void _emitHaptic() {
-    final h = widget.config.haptics;
-    switch (h) {
-      case CameraDialHaptics.off:
-        return;
-      case CameraDialHaptics.light:
-        HapticFeedback.lightImpact();
-      case CameraDialHaptics.medium:
-        HapticFeedback.mediumImpact();
-      case CameraDialHaptics.heavy:
-        HapticFeedback.heavyImpact();
-      case CameraDialHaptics.vibrate:
-        HapticFeedback.vibrate();
-    }
+    final haptic = widget.config.hapticFeedback;
+    if (haptic != null) unawaited(haptic());
   }
 
   void _trackVelocity(double delta) {
