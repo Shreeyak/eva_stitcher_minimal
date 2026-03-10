@@ -501,62 +501,64 @@ class _CameraScreenState extends State<CameraScreen> {
                     child: MiniMap(frameCount: _info.frameCount),
                   ),
 
-                  // Settings drawer + info bar pinned to bottom
+                  // All bottom controls pinned to the bottom of the screen
                   Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    // ColoredBox ensures any sub-pixel gap between the animated
-                    // settings strip and the info bar is covered, preventing
-                    // camera bleed from showing through.
-                    child: ColoredBox(
-                      color: Theme.of(context).colorScheme.surfaceContainer,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_cameraStarted)
-                            CameraSettingsDrawer(
-                              isOpen: _settingsDrawerOpen,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Floating ruler slider
+                        // Only visible when the drawer is open and a chip is active.
+                        if (_activeSetting != null &&
+                            _settingsDrawerOpen &&
+                            _cameraStarted) ...[
+                          SizedBox(
+                            height:
+                                44, // Matches the ruler's totalHeight precisely
+                            child: CameraControlOverlay(
                               activeSetting: _activeSetting,
-                              onSettingChipTap: _onSettingChipTap,
                               values: _values,
+                              ranges: _ranges,
                               callbacks: _callbacks,
                             ),
-                          BottomInfoBar(
-                            isScanning: _isScanning,
-                            frameCount: _info.frameCount,
-                            stitchedCount: _stitchedCount,
-                            totalTarget: 0,
-                            coveragePct: 0.0,
-                            sessionSeconds: _sessionSeconds,
                           ),
+                          // The relative gap between the overlay and the bar below it
+                          const SizedBox(height: 12),
                         ],
-                      ),
+
+                        // ColoredBox ensures any sub-pixel gap between the animated
+                        // settings strip and the info bar is covered.
+                        ColoredBox(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerLowest,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_cameraStarted)
+                                CameraSettingsDrawer(
+                                  isOpen: _settingsDrawerOpen,
+                                  activeSetting: _activeSetting,
+                                  onSettingChipTap: _onSettingChipTap,
+                                  values: _values,
+                                  callbacks: _callbacks,
+                                ),
+                              BottomInfoBar(
+                                isScanning: _isScanning,
+                                frameCount: _info.frameCount,
+                                stitchedCount: _stitchedCount,
+                                totalTarget: 0,
+                                coveragePct: 0.0,
+                                sessionSeconds: _sessionSeconds,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-
-                  // Floating ruler slider — shown above the icon strip.
-                  // Only visible when the drawer is open and a chip is active.
-                  //
-                  // Vertical position: bottom of screen minus info bar (36 px) +
-                  // settings strip (52 px) + 12 px breathing room = 100 px.
-                  if (_activeSetting != null &&
-                      _settingsDrawerOpen &&
-                      _cameraStarted)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 100,
-                      // Cap height so the panel can never grow tall enough to
-                      // overlap with widgets pinned to the top of the screen.
-                      height: 80,
-                      child: CameraControlOverlay(
-                        activeSetting: _activeSetting,
-                        values: _values,
-                        ranges: _ranges,
-                        callbacks: _callbacks,
-                      ),
-                    ),
 
                   // Resolution debug badge (top-left, subtle)
                   if (_cameraStarted)

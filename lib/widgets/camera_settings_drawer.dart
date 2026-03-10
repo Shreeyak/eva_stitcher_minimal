@@ -186,7 +186,7 @@ class CameraSettingsDrawer extends StatelessWidget {
   Widget _buildStrip(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Container(
-      color: cs.surfaceContainer,
+      color: cs.surfaceContainerLowest,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -276,6 +276,8 @@ class _CamSettingsChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 6),
       child: FilterChip(
         showCheckmark: false,
+        backgroundColor: cs.surfaceContainerLow,
+        side: BorderSide.none,
         avatar: Icon(icon, size: 13),
         label: Column(
           mainAxisSize: MainAxisSize.min,

@@ -33,8 +33,8 @@ class LeftToolbar extends StatelessWidget {
     return Container(
       width: 70,
       decoration: BoxDecoration(
-        color: cs.surfaceContainer,
-        border: Border(right: BorderSide(color: cs.outlineVariant, width: 1)),
+        color: cs.surfaceContainerLowest,
+        // border: Border(right: BorderSide(color: cs.outlineVariant, width: 1)),
       ),
       child: Column(
         children: [

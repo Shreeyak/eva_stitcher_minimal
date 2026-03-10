@@ -118,9 +118,10 @@ class _WbControlPanel extends StatelessWidget {
         style: ButtonStyle(
           visualDensity: VisualDensity.compact,
           backgroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected))
-              return cs.primaryContainer.withValues(alpha: 0.85);
-            return cs.surfaceContainer.withValues(alpha: 0.85);
+            if (states.contains(WidgetState.selected)) {
+              return cs.secondaryContainer.withValues(alpha: 0.85);
+            }
+            return cs.surfaceContainerLow.withValues(alpha: 0.85);
           }),
         ),
         segments: const [
