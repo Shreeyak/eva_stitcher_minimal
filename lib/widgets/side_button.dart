@@ -26,9 +26,11 @@ class SideButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final baseColor = color ?? cs.onSurfaceVariant;
+    // When active, honour explicit `color` prop (e.g. tertiary for scanning)
+    // before falling back to the theme primary.
     final effectiveColor = isDisabled
         ? cs.outline
-        : (isActive ? cs.primary : baseColor);
+        : (isActive ? (color ?? cs.primary) : baseColor);
 
     return Material(
       color: Colors.transparent,
@@ -40,7 +42,9 @@ class SideButton extends StatelessWidget {
           decoration: isActive
               ? BoxDecoration(
                   color: cs.primaryContainer,
-                  border: Border(left: BorderSide(color: cs.primary, width: 3)),
+                  border: Border(
+                    left: BorderSide(color: effectiveColor, width: 3),
+                  ),
                 )
               : null,
           child: Column(

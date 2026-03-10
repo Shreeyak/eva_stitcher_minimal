@@ -31,21 +31,11 @@ class EvaApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = createTextTheme(context, 'Roboto', 'Noto Sans');
-    final materialTheme = MaterialTheme(textTheme);
-    const snackBarShape = RoundedRectangleBorder(
-      side: BorderSide(
-        color: Color(0xff53433e),
-      ), // outlineVariant from dark scheme
-      borderRadius: BorderRadius.all(Radius.circular(6)),
-    );
+    final materialTheme = MaterialTheme(createTextTheme('Roboto', 'Noto Sans'));
     return MaterialApp(
       title: 'EVA - Whole Slide Imaging',
       debugShowCheckedModeBanner: false,
-      theme: materialTheme.light(),
-      darkTheme: materialTheme.dark().copyWith(
-        snackBarTheme: const SnackBarThemeData(shape: snackBarShape),
-      ),
+      darkTheme: materialTheme.dark(),
       themeMode: ThemeMode.dark,
       home: const CameraScreen(),
     );

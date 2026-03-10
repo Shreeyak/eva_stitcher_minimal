@@ -91,8 +91,8 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    // Scanning: primary (active accent). Idle: outline (muted).
-    final color = isScanning ? cs.primary : cs.outline;
+    // Scanning: primary (active accent). Idle: tertiary (warm gold = ready/ok).
+    final color = isScanning ? cs.primary : cs.tertiary;
     final label = isScanning ? 'SCANNING' : 'IDLE';
     return Row(
       mainAxisSize: MainAxisSize.min,

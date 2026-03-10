@@ -4,18 +4,17 @@
 // Copied from the Material Theme Builder export (util.dart).
 //
 // Usage:
-//   final textTheme = createTextTheme(context, 'Roboto', 'Noto Sans');
+//   final textTheme = createTextTheme('Roboto', 'Noto Sans');
 //   final theme = MaterialTheme(textTheme);
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-TextTheme createTextTheme(
-  BuildContext context,
-  String bodyFontString,
-  String displayFontString,
-) {
-  TextTheme baseTextTheme = Theme.of(context).textTheme;
+// No BuildContext needed — the base scale is the M3 default, which is what
+// Theme.of(context).textTheme returns at the app root before any MaterialApp
+// ancestor exists anyway.
+TextTheme createTextTheme(String bodyFontString, String displayFontString) {
+  const TextTheme baseTextTheme = TextTheme();
   TextTheme bodyTextTheme = GoogleFonts.getTextTheme(
     bodyFontString,
     baseTextTheme,

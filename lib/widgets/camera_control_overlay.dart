@@ -72,6 +72,13 @@ class CameraControlOverlay extends StatelessWidget {
     }
 
     final cs = Theme.of(context).colorScheme;
+    // Blend surface at 82% opacity over the black camera preview to get a
+    // single opaque composite. Both the pill background and the dial fade
+    // gradient use this colour so their edges match exactly.
+    final overlayBg = Color.alphaBlend(
+      cs.surface.withValues(alpha: 0.82),
+      Colors.black,
+    );
     final config = model.config;
     return Center(
       child: ConstrainedBox(
@@ -79,13 +86,13 @@ class CameraControlOverlay extends StatelessWidget {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(100),
           child: ColoredBox(
-            color: cs.surface.withValues(alpha: 0.82),
+            color: overlayBg,
             child: CameraRulerDial(
               key: ValueKey(param),
               config: config,
               initialValue: model.initialValue,
               onChanged: model.onChanged,
-              fadeColor: cs.surface,
+              fadeColor: overlayBg,
               leftIcon: Icon(
                 config.leftIcon,
                 size: config.iconSize,

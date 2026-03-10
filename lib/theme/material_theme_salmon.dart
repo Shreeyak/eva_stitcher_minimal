@@ -358,6 +358,12 @@ class MaterialTheme {
     ),
     scaffoldBackgroundColor: colorScheme.surface,
     canvasColor: colorScheme.surface,
+    snackBarTheme: SnackBarThemeData(
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: colorScheme.outlineVariant),
+        borderRadius: const BorderRadius.all(Radius.circular(6)),
+      ),
+    ),
   );
 
   List<ExtendedColor> get extendedColors => [];
