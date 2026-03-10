@@ -374,9 +374,10 @@ class _TicksPainter extends CustomPainter {
       if (fade <= 0) continue;
 
       final bool isMajor = i % config.majorTickEvery == 0;
+      final Color baseColor = isMajor ? ticks.color : ticks.minorColor;
       paint
         ..strokeWidth = isMajor ? ticks.majorWidth : ticks.minorWidth
-        ..color = ticks.color.withValues(
+        ..color = baseColor.withValues(
           alpha: (isMajor ? ticks.majorOpacity : ticks.minorOpacity) * fade,
         );
 
