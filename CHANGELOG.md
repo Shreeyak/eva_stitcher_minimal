@@ -4,13 +4,13 @@
 
 ### Material 3 full theme refactor — remove app_theme.dart
 
-- Deleted `lib/app_theme.dart` and `lib/material_theme_util.dart`; created `lib/theme/material_theme.dart` (salmon `MaterialTheme`) and `lib/theme/theme_util.dart` (`createTextTheme` via `google_fonts`). Added `google_fonts: ^6.2.1` to `pubspec.yaml`.
+- Deleted `lib/app_theme.dart` and `lib/material_theme_util.dart`; created `lib/theme/material_theme_salmon.dart` (salmon `MaterialTheme`) and `lib/theme/theme_util.dart` (`createTextTheme` via `google_fonts`). Added `google_fonts: ^6.2.1` to `pubspec.yaml`.
 - All widgets now use `Theme.of(context).colorScheme` directly (`cs.primary`, `cs.surfaceContainer`, `cs.outlineVariant`, etc.) — no `k*` constant imports remain anywhere in `lib/`.
 - `_WbControlPanel` replaced `_WbActionButton` pair with M3 `SegmentedButton<bool>`; `_GridPainter` and `_MiniMapPainter` receive colors as constructor params from parent `build()`.
-- Replaced custom `_ParamChip` (GestureDetector+AnimatedContainer) with M3 `FilterChip` in `camera_settings_drawer.dart`
+- Replaced custom `_CamSettingsChip` (GestureDetector+AnimatedContainer) with M3 `FilterChip` in `camera_settings_drawer.dart`
 - ruler dial `fadeColor` derived via `Color.alphaBlend` to match the composite pill background exactly.
 - `_StatusBadge` idle dot changed from `cs.outline` (muted) to `cs.tertiary` (warm gold = ready/ok); `SideButton.color` prop now respected when `isActive` so `cs.tertiary` renders for the scanning button.
-- `snackBarShape` moved into `MaterialTheme.theme()` using `colorScheme.outlineVariant` — removes hardcoded
+- `snackBarShape` moved into `MaterialTheme.theme()` using `colorScheme.outlineVariant`
 
 ## 2026-03-09 (update 33)
 

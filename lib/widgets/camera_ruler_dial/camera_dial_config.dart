@@ -66,7 +66,7 @@ class CameraDialFadeStyle {
   final double minFadeValue;
 
   const CameraDialFadeStyle({
-    this.fadeZoneFraction = 0.22,
+    this.fadeZoneFraction = 0.3,
     this.fadeZoneMinPx = 20.0,
     this.fadeZoneMaxPx = 90.0,
     this.minFadeValue = 0.3,

@@ -3,7 +3,7 @@
 ## Overview
 
 This app uses the Material Theme Builder–generated `MaterialTheme` class
-(`lib/theme/material_theme.dart`) together with a `createTextTheme()` helper
+(`lib/theme/material_theme_<name>.dart`) together with a `createTextTheme()` helper
 (`lib/theme/theme_util.dart`).  All widgets read colors from
 `Theme.of(context).colorScheme` — no hard-coded color constants anywhere.
 
@@ -39,7 +39,7 @@ chipTheme: ChipThemeData(
   animationDuration: const Duration(milliseconds: 80),
   surfaceTintColor: Colors.transparent, // optional: suppress tint layer too
 ),
-// and then on the FilterChip itself in _ParamChip:
+// and then on the FilterChip itself in _CamSettingsChip:
 // splashFactory: NoSplash.splashFactory,  ← per-widget override
 ```
 
@@ -65,7 +65,7 @@ The class name `MaterialTheme` stays the same; all widgets continue to work.
 
 ### `lib/theme/theme_util.dart`
 
-Contains `createTextTheme(context, bodyFont, displayFont)` which merges two
+Contains `createTextTheme(bodyFont, displayFont)` which merges two
 Google Fonts into one `TextTheme`:
 
 - `displayFont` is used for headlines, display, and title styles.
