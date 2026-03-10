@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../app_theme.dart';
 
 /// Fixed-height bottom bar showing scan status, frame counts and session time.
 class BottomInfoBar extends StatelessWidget {
@@ -31,9 +30,10 @@ class BottomInfoBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       height: 36,
-      color: kPanelColor,
+      color: cs.surfaceContainer,
       child: Row(
         children: [
           const SizedBox(width: 12),
@@ -82,7 +82,7 @@ class BottomInfoBar extends StatelessWidget {
   }
 }
 
-// ── Private helpers ──────────────────────────────────────────────────────
+// ── Private helpers ───────────────────────────────────────────────────────────
 
 class _StatusBadge extends StatelessWidget {
   final bool isScanning;
@@ -90,7 +90,9 @@ class _StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isScanning ? kOrange : kGreen;
+    final cs = Theme.of(context).colorScheme;
+    // Scanning: primary (active accent). Idle: outline (muted).
+    final color = isScanning ? cs.primary : cs.outline;
     final label = isScanning ? 'SCANNING' : 'IDLE';
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -133,29 +135,30 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 11, color: kTextMuted),
+          Icon(icon, size: 11, color: cs.outline),
           const SizedBox(width: 4),
           RichText(
             text: TextSpan(
               children: [
                 TextSpan(
                   text: '$label ',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 9,
-                    color: kTextMuted,
+                    color: cs.outline,
                     letterSpacing: 0.8,
                   ),
                 ),
                 TextSpan(
                   text: value,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10,
-                    color: kTextSecondary,
+                    color: cs.onSurfaceVariant,
                     fontFamily: 'monospace',
                     fontWeight: FontWeight.w600,
                   ),
@@ -174,6 +177,10 @@ class _Divider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 1, height: 18, color: kBorderColor);
+    return Container(
+      width: 1,
+      height: 18,
+      color: Theme.of(context).colorScheme.outlineVariant,
+    );
   }
 }

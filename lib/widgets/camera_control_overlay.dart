@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../app_theme.dart';
 import '../camera/camera_state.dart';
 import 'camera_ruler_dial/camera_dial_presets.dart';
 import 'camera_ruler_dial/camera_ruler_dial.dart';
@@ -72,6 +71,7 @@ class CameraControlOverlay extends StatelessWidget {
         return const SizedBox.shrink();
     }
 
+    final cs = Theme.of(context).colorScheme;
     final config = model.config;
     return Center(
       child: ConstrainedBox(
@@ -79,22 +79,22 @@ class CameraControlOverlay extends StatelessWidget {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(100),
           child: ColoredBox(
-            color: const Color(0xFF1A1A1A).withValues(alpha: 0.82),
+            color: cs.surface.withValues(alpha: 0.82),
             child: CameraRulerDial(
               key: ValueKey(param),
               config: config,
               initialValue: model.initialValue,
               onChanged: model.onChanged,
-              fadeColor: Colors.black,
+              fadeColor: cs.surface,
               leftIcon: Icon(
                 config.leftIcon,
                 size: config.iconSize,
-                color: Colors.white.withValues(alpha: 0.5),
+                color: cs.onSurface.withValues(alpha: 0.5),
               ),
               rightIcon: Icon(
                 config.rightIcon,
                 size: config.iconSize,
-                color: Colors.white.withValues(alpha: 0.5),
+                color: cs.onSurface.withValues(alpha: 0.5),
               ),
             ),
           ),
@@ -117,75 +117,40 @@ class _WbControlPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       decoration: BoxDecoration(
-        color: kPanelColor.withValues(alpha: 0.95),
+        color: cs.surfaceContainer.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: kBorderColor),
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _WbActionButton(
-            label: 'Auto AWB',
-            icon: Icons.wb_auto,
-            isActive: !wbLocked,
-            onTap: wbLocked ? onUnlockWb : null,
-          ),
-          const SizedBox(width: 16),
-          _WbActionButton(
-            label: 'Lock WB',
-            icon: Icons.lock,
-            isActive: wbLocked,
-            onTap: !wbLocked ? onLockWb : null,
+          // M3 SegmentedButton — selected segment is automatically filled.
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment<bool>(
+                value: false,
+                label: Text('Auto AWB'),
+                icon: Icon(Icons.wb_auto),
+              ),
+              ButtonSegment<bool>(
+                value: true,
+                label: Text('Lock WB'),
+                icon: Icon(Icons.lock),
+              ),
+            ],
+            selected: {wbLocked},
+            onSelectionChanged: (Set<bool> selection) {
+              final locked = selection.first;
+              if (locked && !wbLocked) onLockWb();
+              if (!locked && wbLocked) onUnlockWb();
+            },
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _WbActionButton extends StatelessWidget {
-  const _WbActionButton({
-    required this.label,
-    required this.icon,
-    required this.isActive,
-    this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool isActive;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        decoration: BoxDecoration(
-          color: isActive ? kAccent : kBorderColor,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: isActive ? Colors.white : kTextMuted),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: isActive ? Colors.white : kTextMuted,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/services.dart';
 
-import 'app_theme.dart';
+import 'theme/material_theme_salmon.dart';
+import 'theme/theme_util.dart';
 import 'camera/camera_control.dart';
 import 'camera/camera_settings_queue.dart';
 import 'camera/camera_state.dart';
@@ -30,24 +31,22 @@ class EvaApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = createTextTheme(context, 'Roboto', 'Noto Sans');
+    final materialTheme = MaterialTheme(textTheme);
+    const snackBarShape = RoundedRectangleBorder(
+      side: BorderSide(
+        color: Color(0xff53433e),
+      ), // outlineVariant from dark scheme
+      borderRadius: BorderRadius.all(Radius.circular(6)),
+    );
     return MaterialApp(
       title: 'EVA - Whole Slide Imaging',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: kBgColor,
-        colorScheme: const ColorScheme.dark(
-          primary: kAccent,
-          surface: kPanelColor,
-        ),
-        snackBarTheme: SnackBarThemeData(
-          backgroundColor: kPanelColor,
-          contentTextStyle: const TextStyle(color: kTextSecondary),
-          shape: RoundedRectangleBorder(
-            side: const BorderSide(color: kBorderColor),
-            borderRadius: BorderRadius.circular(6),
-          ),
-        ),
+      theme: materialTheme.light(),
+      darkTheme: materialTheme.dark().copyWith(
+        snackBarTheme: const SnackBarThemeData(shape: snackBarShape),
       ),
+      themeMode: ThemeMode.dark,
       home: const CameraScreen(),
     );
   }
@@ -456,8 +455,9 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: kBgColor,
+      backgroundColor: cs.surface,
       body: SafeArea(
         top: true,
         bottom: false,
@@ -491,10 +491,13 @@ class _CameraScreenState extends State<CameraScreen> {
                       ),
                     )
                   else
-                    const Center(
+                    Center(
                       child: Text(
                         'Camera permission required',
-                        style: TextStyle(color: kTextSecondary, fontSize: 16),
+                        style: TextStyle(
+                          color: cs.onSurfaceVariant,
+                          fontSize: 16,
+                        ),
                       ),
                     ),
 
@@ -597,19 +600,20 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Widget _buildResolutionBadge() {
+    final cs = Theme.of(context).colorScheme;
     return RepaintBoundary(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
         decoration: BoxDecoration(
-          color: kPanelColor.withValues(alpha: 0.85),
+          color: cs.surfaceContainer.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: kBorderColor),
+          border: Border.all(color: cs.outlineVariant),
         ),
         child: Text(
           'Cap: ${_info.captureResolution}  |  Ana: ${_info.analysisResolution}'
           '  |  ${_info.fps.toStringAsFixed(1)} fps',
-          style: const TextStyle(
-            color: kTextMuted,
+          style: TextStyle(
+            color: cs.outline,
             fontSize: 9,
             fontFamily: 'monospace',
             letterSpacing: 0.3,

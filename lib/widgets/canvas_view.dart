@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../app_theme.dart';
 
 /// Mock canvas view — a dark grid placeholder for the tile stitcher output.
 /// Will be replaced with the real tile renderer in Phase 2.
@@ -11,33 +10,47 @@ class CanvasView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      color: kBgColor,
+      color: cs.surface,
       child: CustomPaint(
-        painter: _GridPainter(viewportCenter: viewportCenter),
+        painter: _GridPainter(
+          viewportCenter: viewportCenter,
+          minorColor: cs.surfaceContainer,
+          majorColor: cs.surfaceContainerHighest,
+          crosshairColor: cs.outlineVariant,
+        ),
         child: const SizedBox.expand(),
       ),
     );
   }
 }
 
-// ── Painter ──────────────────────────────────────────────────────────────
+// ── Painter ───────────────────────────────────────────────────────────────────
 
 class _GridPainter extends CustomPainter {
   final Offset viewportCenter;
+  final Color minorColor;
+  final Color majorColor;
+  final Color crosshairColor;
 
-  const _GridPainter({required this.viewportCenter});
+  const _GridPainter({
+    required this.viewportCenter,
+    required this.minorColor,
+    required this.majorColor,
+    required this.crosshairColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     const gridSpacing = 48.0;
 
     final minorPaint = Paint()
-      ..color = const Color(0xFF141E38)
+      ..color = minorColor
       ..strokeWidth = 0.5;
 
     final majorPaint = Paint()
-      ..color = const Color(0xFF1A2A4A)
+      ..color = majorColor
       ..strokeWidth = 1.0;
 
     // Offset so grid scrolls with viewport (for future pan)
@@ -66,7 +79,7 @@ class _GridPainter extends CustomPainter {
 
     // Center crosshair
     final crossPaint = Paint()
-      ..color = kBorderColor
+      ..color = crosshairColor
       ..strokeWidth = 1.0;
     final cx = size.width / 2;
     final cy = size.height / 2;
@@ -74,20 +87,25 @@ class _GridPainter extends CustomPainter {
     canvas.drawLine(Offset(cx, cy - 12), Offset(cx, cy + 12), crossPaint);
 
     // "No canvas data" label
-    const style = TextStyle(
-      color: kBorderColor,
-      fontSize: 13,
-      letterSpacing: 1.5,
-      fontWeight: FontWeight.w300,
-    );
-    const label = 'NO CANVAS DATA';
     final tp = TextPainter(
-      text: const TextSpan(text: label, style: style),
+      text: TextSpan(
+        text: 'NO CANVAS DATA',
+        style: TextStyle(
+          color: crosshairColor,
+          fontSize: 13,
+          letterSpacing: 1.5,
+          fontWeight: FontWeight.w300,
+        ),
+      ),
       textDirection: TextDirection.ltr,
     )..layout();
     tp.paint(canvas, Offset(cx - tp.width / 2, cy + 20));
   }
 
   @override
-  bool shouldRepaint(_GridPainter old) => old.viewportCenter != viewportCenter;
+  bool shouldRepaint(_GridPainter old) =>
+      old.viewportCenter != viewportCenter ||
+      old.minorColor != minorColor ||
+      old.majorColor != majorColor ||
+      old.crosshairColor != crosshairColor;
 }

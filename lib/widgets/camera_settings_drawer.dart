@@ -19,7 +19,6 @@
 
 import 'package:flutter/material.dart';
 
-import '../app_theme.dart';
 import '../camera/camera_state.dart';
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -171,7 +170,7 @@ class CameraSettingsDrawer extends StatelessWidget {
       tween: Tween<double>(begin: 0.0, end: isOpen ? 1.0 : 0.0),
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeInOut,
-      child: SizedBox(height: _kStripHeight, child: _buildStrip()),
+      child: SizedBox(height: _kStripHeight, child: _buildStrip(context)),
       builder: (context, factor, child) {
         return ClipRect(
           child: Align(
@@ -184,13 +183,14 @@ class CameraSettingsDrawer extends StatelessWidget {
     );
   }
 
-  Widget _buildStrip() {
+  Widget _buildStrip(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      color: kPanelColor,
+      color: cs.surfaceContainer,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Divider(height: 1, thickness: 1, color: kBorderColor),
+          const Divider(height: 1, thickness: 1),
           Expanded(
             child: Row(
               children: [
@@ -201,7 +201,7 @@ class CameraSettingsDrawer extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 6),
                     child: Row(
                       children: CameraSettingType.values.map((p) {
-                        return _ParamChip(
+                        return _CamSettingsChip(
                           param: p,
                           icon: _settingIcons[p]!,
                           valueLabel: _chipLabel(p),
@@ -221,7 +221,6 @@ class CameraSettingsDrawer extends StatelessWidget {
                 const VerticalDivider(
                   width: 1,
                   thickness: 1,
-                  color: kBorderColor,
                   indent: 8,
                   endIndent: 8,
                 ),
@@ -245,15 +244,15 @@ class CameraSettingsDrawer extends StatelessWidget {
   }
 }
 
-// ─── _ParamChip ───────────────────────────────────────────────────────────────
+// ─── CamSettings in Drawer ───────────────────────────────────────────────────────────────
 
-/// One tappable icon chip in the settings strip.
+/// One tappable FilterChip in the settings strip.
 ///
-/// Shows the parameter icon + name + current value.
-/// Highlighted in accent colour when [isActive].
-/// Value label is tinted green when [isAuto] (camera is in automatic control).
-class _ParamChip extends StatelessWidget {
-  const _ParamChip({
+/// Uses M3 FilterChip with `selected` state for active highlighting.
+/// The label shows both the parameter name and current value.
+/// Value text is tinted tertiary when [isAuto] (camera in automatic control).
+class _CamSettingsChip extends StatelessWidget {
+  const _CamSettingsChip({
     required this.param,
     required this.icon,
     required this.valueLabel,
@@ -271,54 +270,36 @@ class _ParamChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: isActive ? kAccent : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isActive ? kAccent : kBorderColor,
-            width: 1,
-          ),
-        ),
-        child: Row(
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 6),
+      child: FilterChip(
+        showCheckmark: false,
+        avatar: Icon(icon, size: 13),
+        label: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 13, color: isActive ? Colors.white : kTextMuted),
-            const SizedBox(width: 4),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _settingLabels[param]!,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                    color: isActive ? Colors.white : kTextMuted,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                Text(
-                  valueLabel,
-                  style: TextStyle(
-                    fontSize: 9,
-                    color: isAuto
-                        ? kGreen // green = camera is in automatic control
-                        : isActive
-                        ? Colors.white70
-                        : kTextMuted,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ],
+            Text(
+              _settingLabels[param]!,
+              style: const TextStyle(fontSize: 10, letterSpacing: 0.5),
+            ),
+            Text(
+              valueLabel,
+              style: TextStyle(
+                fontSize: 9,
+                // tertiary = camera is in automatic control
+                color: isAuto ? cs.tertiary : null,
+                fontFamily: 'monospace',
+              ),
             ),
           ],
         ),
+        selected: isActive,
+        onSelected: (_) => onTap(),
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
       ),
     );
   }
@@ -338,6 +319,7 @@ class _AutoButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -345,7 +327,7 @@ class _AutoButton extends StatelessWidget {
         width: 56,
         decoration: BoxDecoration(
           // Subtle accent background reinforces "auto is on" state.
-          color: isAuto ? kAccentActive : Colors.transparent,
+          color: isAuto ? cs.primaryContainer : Colors.transparent,
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -355,15 +337,15 @@ class _AutoButton extends StatelessWidget {
               height: 28,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isAuto ? kAccent : kBorderColor,
+                color: isAuto ? cs.primary : cs.surfaceContainerHigh,
               ),
               child: Center(
                 child: Text(
                   isAuto ? 'A' : 'M',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: isAuto ? cs.onPrimary : cs.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -373,7 +355,7 @@ class _AutoButton extends StatelessWidget {
               isAuto ? 'Auto' : 'Manual',
               style: TextStyle(
                 fontSize: 8,
-                color: isAuto ? kAccent : kTextMuted,
+                color: isAuto ? cs.primary : cs.outline,
                 letterSpacing: 0.2,
               ),
             ),

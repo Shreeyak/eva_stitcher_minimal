@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import '../app_theme.dart';
 import 'side_button.dart';
 
 /// 70 px wide vertical toolbar docked at the left edge.
-/// Solid [kPanelColor] background with deep blue accent highlights.
 class LeftToolbar extends StatelessWidget {
   final bool isScanning;
   final bool showCanvas;
@@ -31,11 +29,12 @@ class LeftToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: 70,
       decoration: BoxDecoration(
-        color: kPanelColor,
-        border: const Border(right: BorderSide(color: kBorderColor, width: 1)),
+        color: cs.surfaceContainer,
+        border: Border(right: BorderSide(color: cs.outlineVariant, width: 1)),
       ),
       child: Column(
         children: [
@@ -43,11 +42,13 @@ class LeftToolbar extends StatelessWidget {
           Container(
             width: 70,
             height: 56,
-            decoration: const BoxDecoration(
-              color: kAccentActive,
-              border: Border(bottom: BorderSide(color: kBorderColor, width: 1)),
+            decoration: BoxDecoration(
+              color: cs.primaryContainer,
+              border: Border(
+                bottom: BorderSide(color: cs.outlineVariant, width: 1),
+              ),
             ),
-            child: const Icon(Icons.view_in_ar, color: kAccent, size: 28),
+            child: Icon(Icons.view_in_ar, color: cs.primary, size: 28),
           ),
 
           // Main actions
@@ -61,7 +62,7 @@ class LeftToolbar extends StatelessWidget {
                       : Icons.play_circle_outline,
                   label: isScanning ? 'Stop' : 'Start\nScan',
                   isActive: isScanning,
-                  color: isScanning ? kOrange : null,
+                  color: isScanning ? cs.tertiary : null,
                   onTap: onToggleScan,
                 ),
                 SideButton(
@@ -75,9 +76,8 @@ class LeftToolbar extends StatelessWidget {
             ),
           ),
 
-          // Bottom: Export
-          const Divider(height: 1, thickness: 1, color: kBorderColor),
-          // Settings moved to bottom above Export
+          // Bottom: Settings + Export
+          const Divider(height: 1, thickness: 1),
           SideButton(
             icon: Icons.tune,
             label: 'Settings',
