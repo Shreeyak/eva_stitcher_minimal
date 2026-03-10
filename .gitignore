@@ -10,6 +10,7 @@ scripts/**/*.jpeg
 scripts/**/*.csv
 scripts/tmp_files/**
 .vscode/
+/*.png
 
 # Miscellaneous
 pubspec.lock

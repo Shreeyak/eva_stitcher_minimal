@@ -143,9 +143,15 @@ class ZoomDialPreset {
     if (max > lastInt + 0.02) stops.add(max);
     if (stops.length < 2) stops.add(max);
 
+    const int majorEvery = 2;
+    // Allow enough side labels for the worst case: indicator at one extreme,
+    // all major ticks on the other side. Prevents in-viewport labels from
+    // being silently dropped when the dial's full range fits in the viewport.
+    final int maxSideLabels = ((stops.length - 1) / majorEvery).ceil();
+
     final config = CameraDialConfig(
       stops: stops,
-      majorTickEvery: 2,
+      majorTickEvery: majorEvery,
       formatter: (v) {
         if ((v - v.roundToDouble()).abs() < 0.05) return '${v.round()}×';
         return '${v.toStringAsFixed(1)}×';
@@ -153,6 +159,9 @@ class ZoomDialPreset {
       leftIcon: Icons.zoom_out,
       rightIcon: Icons.zoom_in,
       iconSize: 20,
+      style: CameraDialStyle(
+        labels: CameraDialLabelStyle(maxPerSide: maxSideLabels),
+      ),
     );
 
     return CameraDialModel(

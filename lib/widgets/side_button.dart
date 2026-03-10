@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import '../app_theme.dart';
 
 /// A vertical icon+label button for the left toolbar.
-/// Active state is highlighted with the blue accent color.
+/// Active state is highlighted with the theme's primary colour.
 class SideButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -25,25 +24,26 @@ class SideButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final baseColor = color ?? kTextSecondary;
+    final cs = Theme.of(context).colorScheme;
+    final baseColor = color ?? cs.onSurfaceVariant;
+    // When active, honour explicit `color` prop (e.g. tertiary for scanning)
+    // before falling back to the theme primary.
     final effectiveColor = isDisabled
-        ? kTextMuted
-        : (isActive ? kAccent : baseColor);
+        ? cs.outline
+        : (isActive ? (color ?? cs.primary) : baseColor);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: isDisabled ? null : onTap,
-        splashColor: kAccent.withValues(alpha: 0.15),
-        highlightColor: kAccent.withValues(alpha: 0.08),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: isActive
               ? BoxDecoration(
-                  color: kAccentActive,
-                  border: const Border(
-                    left: BorderSide(color: kAccent, width: 3),
+                  color: cs.primaryContainer,
+                  border: Border(
+                    left: BorderSide(color: effectiveColor, width: 3),
                   ),
                 )
               : null,

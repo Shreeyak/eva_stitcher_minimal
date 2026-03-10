@@ -66,7 +66,7 @@ class CameraDialFadeStyle {
   final double minFadeValue;
 
   const CameraDialFadeStyle({
-    this.fadeZoneFraction = 0.22,
+    this.fadeZoneFraction = 0.3,
     this.fadeZoneMinPx = 20.0,
     this.fadeZoneMaxPx = 90.0,
     this.minFadeValue = 0.3,
@@ -83,6 +83,11 @@ class CameraDialTickStyle {
   final double majorOpacity;
   final double minorOpacity;
 
+  /// Fraction applied to the major tick's saturation to produce the minor
+  /// tick colour. Range 0.0..1.0 (0 = fully desaturated / grey, 1 = same
+  /// saturation as the major tick). Tunable so callers can adjust contrast.
+  final double minorSaturationFactor;
+
   const CameraDialTickStyle({
     this.color = const Color(0xFFD4847A),
     this.majorWidth = 2.0,
@@ -91,7 +96,16 @@ class CameraDialTickStyle {
     this.minorHeight = 7.0,
     this.majorOpacity = 0.85,
     this.minorOpacity = 0.45,
+    this.minorSaturationFactor = 0.25,
   });
+
+  /// Derive a desaturated minor-tick colour from [color]. Uses HSL space so
+  /// we preserve hue/lightness while reducing saturation.
+  Color get minorColor {
+    final hsl = HSLColor.fromColor(color);
+    final double s = (hsl.saturation * minorSaturationFactor).clamp(0.0, 1.0);
+    return hsl.withSaturation(s).toColor();
+  }
 }
 
 @immutable

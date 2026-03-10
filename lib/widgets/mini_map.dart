@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import '../app_theme.dart';
 
 /// Small thumbnail map shown in the top-right corner.
 /// Shows a downscaled view of the stitched canvas (mock grid for now)
-/// with an orange rectangle representing the current camera viewport.
+/// with a viewport rectangle representing the current camera view.
 class MiniMap extends StatelessWidget {
   final int frameCount;
 
@@ -21,12 +20,13 @@ class MiniMap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: _kWidth,
       height: _kHeight,
       decoration: BoxDecoration(
-        color: kBgColor,
-        border: Border.all(color: kAccent, width: 1.5),
+        color: cs.surface,
+        border: Border.all(color: cs.primary, width: 1.5),
         borderRadius: BorderRadius.circular(4),
       ),
       child: ClipRRect(
@@ -35,7 +35,11 @@ class MiniMap extends StatelessWidget {
           children: [
             // Grid background
             CustomPaint(
-              painter: _MiniMapPainter(viewportFraction: viewportFraction),
+              painter: _MiniMapPainter(
+                viewportFraction: viewportFraction,
+                gridColor: cs.surfaceContainer,
+                viewportColor: cs.tertiary,
+              ),
               child: const SizedBox.expand(),
             ),
 
@@ -48,7 +52,7 @@ class MiniMap extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 8,
                   fontWeight: FontWeight.w600,
-                  color: kAccent,
+                  color: cs.primary,
                   letterSpacing: 1.4,
                 ),
               ),
@@ -61,14 +65,14 @@ class MiniMap extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: kPanelColor,
+                  color: cs.surfaceContainer,
                   borderRadius: BorderRadius.circular(3),
                 ),
                 child: Text(
                   '$frameCount frames',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 8,
-                    color: kTextMuted,
+                    color: cs.outline,
                     fontFamily: 'monospace',
                   ),
                 ),
@@ -81,19 +85,25 @@ class MiniMap extends StatelessWidget {
   }
 }
 
-// ── Painter ──────────────────────────────────────────────────────────────
+// ── Painter ───────────────────────────────────────────────────────────────────
 
 class _MiniMapPainter extends CustomPainter {
   final Rect viewportFraction;
+  final Color gridColor;
+  final Color viewportColor;
 
-  const _MiniMapPainter({required this.viewportFraction});
+  const _MiniMapPainter({
+    required this.viewportFraction,
+    required this.gridColor,
+    required this.viewportColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     const spacing = 16.0;
 
     final gridPaint = Paint()
-      ..color = const Color(0xFF141E38)
+      ..color = gridColor
       ..strokeWidth = 0.5;
 
     // Vertical lines
@@ -110,7 +120,7 @@ class _MiniMapPainter extends CustomPainter {
       y += spacing;
     }
 
-    // Viewport rect (orange)
+    // Viewport rect
     final vpRect = Rect.fromLTWH(
       viewportFraction.left * size.width,
       viewportFraction.top * size.height,
@@ -121,22 +131,24 @@ class _MiniMapPainter extends CustomPainter {
     canvas.drawRect(
       vpRect,
       Paint()
-        ..color = kOrange.withValues(alpha: 0.15)
+        ..color = viewportColor.withValues(alpha: 0.15)
         ..style = PaintingStyle.fill,
     );
     canvas.drawRect(
       vpRect,
       Paint()
-        ..color = kOrange
+        ..color = viewportColor
         ..strokeWidth = 1.5
         ..style = PaintingStyle.stroke,
     );
 
     // Center dot in viewport
-    canvas.drawCircle(vpRect.center, 2.0, Paint()..color = kOrange);
+    canvas.drawCircle(vpRect.center, 2.0, Paint()..color = viewportColor);
   }
 
   @override
   bool shouldRepaint(_MiniMapPainter old) =>
-      old.viewportFraction != viewportFraction;
+      old.viewportFraction != viewportFraction ||
+      old.gridColor != gridColor ||
+      old.viewportColor != viewportColor;
 }

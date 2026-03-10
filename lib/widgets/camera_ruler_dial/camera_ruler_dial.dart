@@ -9,19 +9,20 @@ import 'camera_dial_config.dart';
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 /// Smoothstep alpha: 1 in the centre, 0 at the viewport edge.
-/// Applied per-tick rather than via ShaderMask so fading is correct at
-/// min/max scroll positions (ShaderMask bounds shift with scrolling content).
+/// Applied per-element (tick or label) so each gets a single uniform alpha
+/// derived from its centre x — avoids the half-bright/half-dim split that a
+/// ShaderMask produces.
 double _edgeFade(double x, double viewportWidth, CameraDialStyle style) {
   final fade = style.fade;
   final double fadeZone = (viewportWidth * fade.fadeZoneFraction)
       .clamp(fade.fadeZoneMinPx, fade.fadeZoneMaxPx)
       .toDouble();
 
-  double t = 1.0; // fully visible, no fade
+  double t = 1.0; // 1.0 = fully visible, no fade
   if (x < fadeZone) t = (x / fadeZone).clamp(0.0, 1.0);
   if (x > viewportWidth - fadeZone) {
     t = ((viewportWidth - x) / fadeZone).clamp(0.0, 1.0);
-  } // right edge
+  }
   t = t * (1 - fade.minFadeValue) + fade.minFadeValue;
   return t * t * (3.0 - 2.0 * t); // smoothstep curve
 }
@@ -37,10 +38,6 @@ class CameraRulerDial extends StatefulWidget {
   /// Enables fling inertia after drag release.
   final bool enableInertia;
 
-  // fadeColor is kept for API compatibility but not used in rendering —
-  // fading is handled per-tick in _TicksPainter.
-  final Color fadeColor;
-
   /// Icons shown at the left (min) and right (max) ends.
   final Widget? leftIcon;
   final Widget? rightIcon;
@@ -51,7 +48,6 @@ class CameraRulerDial extends StatefulWidget {
     required this.initialValue,
     required this.onChanged,
     this.enableInertia = false,
-    this.fadeColor = Colors.black,
     this.leftIcon,
     this.rightIcon,
   });
@@ -184,98 +180,145 @@ class _CameraRulerDialState extends State<CameraRulerDial> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // Composite: surface @ 82% over black camera preview → single opaque colour.
+    final overlayBg = cs.surface.withValues(alpha: 0.82);
+
     final style = widget.config.style;
     final layout = style.layout;
-    return SizedBox(
-      height: layout.totalHeight,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Tick index 0 position in inner-zone local coordinates.
-          // Pixel-aligned so each tick falls on a whole physical pixel —
-          // prevents sub-pixel AA blur on vertical lines.
-          final dpr = MediaQuery.of(context).devicePixelRatio;
-          final rawOffset =
-              constraints.maxWidth / 2 -
-              _visualIndex * layout.tickSpacing -
-              layout.iconPad;
-          final rulerOffset = (rawOffset * dpr).roundToDouble() / dpr;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(100),
+      child: ColoredBox(
+        color: overlayBg,
+        child: SizedBox(
+          height: layout.totalHeight,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Tick index 0 position in inner-zone local coordinates.
+              // Pixel-aligned so each tick falls on a whole physical pixel —
+              // prevents sub-pixel AA blur on vertical lines.
+              final dpr = MediaQuery.of(context).devicePixelRatio;
+              final rawOffset =
+                  constraints.maxWidth / 2 -
+                  _visualIndex * layout.tickSpacing -
+                  layout.iconPad;
+              final rulerOffset = (rawOffset * dpr).roundToDouble() / dpr;
 
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onHorizontalDragUpdate: (d) {
-              if (widget.enableInertia) _trackVelocity(d.delta.dx);
-              _updateDrag(d.delta.dx);
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: (d) {
+                  if (widget.enableInertia) _trackVelocity(d.delta.dx);
+                  _updateDrag(d.delta.dx);
+                },
+                onHorizontalDragEnd: (_) => _onDragEnd(),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Positioned(
+                      left: layout.iconPad,
+                      right: layout.iconPad,
+                      top: 0,
+                      bottom: 0,
+                      child: _DialTrack(
+                        key: const ValueKey('DialTrack'),
+                        config: widget.config,
+                        rulerOffset: rulerOffset,
+                        visualIndex: _visualIndex,
+                        dpr: dpr,
+                      ),
+                    ),
+
+                    if (widget.leftIcon != null)
+                      Positioned(
+                        left: layout.iconInset,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(child: widget.leftIcon!),
+                      ),
+                    if (widget.rightIcon != null)
+                      Positioned(
+                        right: layout.iconInset,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(child: widget.rightIcon!),
+                      ),
+                  ],
+                ),
+              );
             },
-            onHorizontalDragEnd: (_) => _onDragEnd(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── DialTrack ─────────────────────────────────────────────────────────────────
+
+/// Ticks, labels, and centre indicator — the scrollable ruler content.
+/// Icons and gesture handling live in the parent [_CameraRulerDialState].
+class _DialTrack extends StatelessWidget {
+  final CameraDialConfig config;
+  final double rulerOffset;
+  final double visualIndex;
+  final double dpr;
+
+  const _DialTrack({
+    super.key,
+    required this.config,
+    required this.rulerOffset,
+    required this.visualIndex,
+    required this.dpr,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final style = config.style;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child: ClipRect(
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // Ruler zone — clipped so ticks never render over end icons.
-                Positioned(
-                  left: layout.iconPad,
-                  right: layout.iconPad,
-                  top: 0,
-                  bottom: 0,
-                  child: ClipRect(
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Positioned.fill(
-                          child: CustomPaint(
-                            painter: _TicksPainter(
-                              config: widget.config,
-                              rulerOffset: rulerOffset,
-                              dpr: dpr,
-                            ),
-                          ),
-                        ),
-                        Positioned.fill(
-                          child: IgnorePointer(
-                            child: CustomPaint(
-                              painter: _LabelsPainter(
-                                config: widget.config,
-                                visualIndex: _visualIndex,
-                                rulerOffset: rulerOffset,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _TicksPainter(
+                      config: config,
+                      rulerOffset: rulerOffset,
+                      dpr: dpr,
                     ),
                   ),
                 ),
-
-                // Centre indicator — bottom: 3 creates a small gap beneath ticks.
-                Positioned(
-                  top: 0,
-                  bottom: style.indicator.bottomInset,
-                  left: layout.iconPad,
-                  right: layout.iconPad,
-                  child: Align(
-                    alignment: Alignment.bottomCenter,
-                    child: _Indicator(style: style),
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _LabelsPainter(
+                        config: config,
+                        visualIndex: visualIndex,
+                        rulerOffset: rulerOffset,
+                      ),
+                    ),
                   ),
                 ),
-
-                if (widget.leftIcon != null)
-                  Positioned(
-                    left: layout.iconInset,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(child: widget.leftIcon!),
-                  ),
-                if (widget.rightIcon != null)
-                  Positioned(
-                    right: layout.iconInset,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(child: widget.rightIcon!),
-                  ),
               ],
             ),
-          );
-        },
-      ),
+          ),
+        ),
+
+        // Centre indicator — bottomInset creates a small gap beneath ticks.
+        Positioned(
+          top: 0,
+          bottom: style.indicator.bottomInset,
+          left: 0,
+          right: 0,
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: _Indicator(style: style),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -283,7 +326,7 @@ class _CameraRulerDialState extends State<CameraRulerDial> {
 // ── Painters ──────────────────────────────────────────────────────────────────
 
 /// Draws tick marks for all stops visible in the current viewport.
-/// Per-tick alpha fade via [_edgeFade] keeps fading correct at min/max positions.
+/// Per-tick alpha via [_edgeFade] keeps each tick uniformly faded based on its centre position.
 class _TicksPainter extends CustomPainter {
   final CameraDialConfig config;
 
@@ -331,9 +374,10 @@ class _TicksPainter extends CustomPainter {
       if (fade <= 0) continue;
 
       final bool isMajor = i % config.majorTickEvery == 0;
+      final Color baseColor = isMajor ? ticks.color : ticks.minorColor;
       paint
         ..strokeWidth = isMajor ? ticks.majorWidth : ticks.minorWidth
-        ..color = ticks.color.withValues(
+        ..color = baseColor.withValues(
           alpha: (isMajor ? ticks.majorOpacity : ticks.minorOpacity) * fade,
         );
 
@@ -373,7 +417,7 @@ class _Indicator extends StatelessWidget {
 }
 
 /// Draws the centre value label (large, bold) and up to 2 neighbouring major
-/// tick labels on each side. Labels share the same edge fade as _TicksPainter.
+/// tick labels on each side. Per-label alpha via [_edgeFade] keeps each label uniformly faded.
 class _LabelsPainter extends CustomPainter {
   final CameraDialConfig config;
   final double visualIndex;

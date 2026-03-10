@@ -29,6 +29,7 @@ environment:
 # versions available, run `flutter pub outdated`.
 dependencies:
   material_symbols_icons: ^4.2729.0
+  google_fonts: ^6.2.1
   flutter:
     sdk: flutter
 
