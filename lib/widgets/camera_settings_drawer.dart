@@ -190,7 +190,7 @@ class CameraSettingsDrawer extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Divider(height: 1, thickness: 1),
+          Divider(height: 1, thickness: 1, color: cs.outlineVariant),
           Expanded(
             child: Row(
               children: [
@@ -218,9 +218,10 @@ class CameraSettingsDrawer extends StatelessWidget {
                 ),
 
                 // ── Vertical separator ─────────────────────────────────────
-                const VerticalDivider(
+                VerticalDivider(
                   width: 1,
                   thickness: 1,
+                  color: cs.outlineVariant,
                   indent: 8,
                   endIndent: 8,
                 ),
@@ -298,7 +299,7 @@ class _CamSettingsChip extends StatelessWidget {
         selected: isActive,
         onSelected: (_) => onTap(),
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
+        visualDensity: VisualDensity.standard,
         padding: const EdgeInsets.symmetric(horizontal: 6),
       ),
     );

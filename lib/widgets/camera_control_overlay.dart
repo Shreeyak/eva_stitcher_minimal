@@ -72,38 +72,24 @@ class CameraControlOverlay extends StatelessWidget {
     }
 
     final cs = Theme.of(context).colorScheme;
-    // Blend surface at 82% opacity over the black camera preview to get a
-    // single opaque composite. Both the pill background and the dial fade
-    // gradient use this colour so their edges match exactly.
-    final overlayBg = Color.alphaBlend(
-      cs.surface.withValues(alpha: 0.82),
-      Colors.black,
-    );
     final config = model.config;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 400),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(100),
-          child: ColoredBox(
-            color: overlayBg,
-            child: CameraRulerDial(
-              key: ValueKey(param),
-              config: config,
-              initialValue: model.initialValue,
-              onChanged: model.onChanged,
-              fadeColor: overlayBg,
-              leftIcon: Icon(
-                config.leftIcon,
-                size: config.iconSize,
-                color: cs.onSurface.withValues(alpha: 0.5),
-              ),
-              rightIcon: Icon(
-                config.rightIcon,
-                size: config.iconSize,
-                color: cs.onSurface.withValues(alpha: 0.5),
-              ),
-            ),
+        child: CameraRulerDial(
+          key: ValueKey(param),
+          config: config,
+          initialValue: model.initialValue,
+          onChanged: model.onChanged,
+          leftIcon: Icon(
+            config.leftIcon,
+            size: config.iconSize,
+            color: cs.onSurface.withValues(alpha: 0.5),
+          ),
+          rightIcon: Icon(
+            config.rightIcon,
+            size: config.iconSize,
+            color: cs.onSurface.withValues(alpha: 0.5),
           ),
         ),
       ),
@@ -124,40 +110,37 @@ class _WbControlPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // SegmentedButton provides its own M3 visual container — no extra
+    // wrapping decoration needed. Center it in the 80px overlay slot.
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainer.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: cs.outlineVariant),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // M3 SegmentedButton — selected segment is automatically filled.
-          SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment<bool>(
-                value: false,
-                label: Text('Auto AWB'),
-                icon: Icon(Icons.wb_auto),
-              ),
-              ButtonSegment<bool>(
-                value: true,
-                label: Text('Lock WB'),
-                icon: Icon(Icons.lock),
-              ),
-            ],
-            selected: {wbLocked},
-            onSelectionChanged: (Set<bool> selection) {
-              final locked = selection.first;
-              if (locked && !wbLocked) onLockWb();
-              if (!locked && wbLocked) onUnlockWb();
-            },
+    return Center(
+      child: SegmentedButton<bool>(
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected))
+              return cs.primaryContainer.withValues(alpha: 0.85);
+            return cs.surfaceContainer.withValues(alpha: 0.85);
+          }),
+        ),
+        segments: const [
+          ButtonSegment<bool>(
+            value: false,
+            label: Text('Auto AWB'),
+            icon: Icon(Icons.wb_auto),
+          ),
+          ButtonSegment<bool>(
+            value: true,
+            label: Text('Lock WB'),
+            icon: Icon(Icons.lock),
           ),
         ],
+        selected: {wbLocked},
+        onSelectionChanged: (Set<bool> selection) {
+          final locked = selection.first;
+          if (locked && !wbLocked) onLockWb();
+          if (!locked && wbLocked) onUnlockWb();
+        },
       ),
     );
   }

@@ -506,26 +506,32 @@ class _CameraScreenState extends State<CameraScreen> {
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_cameraStarted)
-                          CameraSettingsDrawer(
-                            isOpen: _settingsDrawerOpen,
-                            activeSetting: _activeSetting,
-                            onSettingChipTap: _onSettingChipTap,
-                            values: _values,
-                            callbacks: _callbacks,
+                    // ColoredBox ensures any sub-pixel gap between the animated
+                    // settings strip and the info bar is covered, preventing
+                    // camera bleed from showing through.
+                    child: ColoredBox(
+                      color: Theme.of(context).colorScheme.surfaceContainer,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_cameraStarted)
+                            CameraSettingsDrawer(
+                              isOpen: _settingsDrawerOpen,
+                              activeSetting: _activeSetting,
+                              onSettingChipTap: _onSettingChipTap,
+                              values: _values,
+                              callbacks: _callbacks,
+                            ),
+                          BottomInfoBar(
+                            isScanning: _isScanning,
+                            frameCount: _info.frameCount,
+                            stitchedCount: _stitchedCount,
+                            totalTarget: 0,
+                            coveragePct: 0.0,
+                            sessionSeconds: _sessionSeconds,
                           ),
-                        BottomInfoBar(
-                          isScanning: _isScanning,
-                          frameCount: _info.frameCount,
-                          stitchedCount: _stitchedCount,
-                          totalTarget: 0,
-                          coveragePct: 0.0,
-                          sessionSeconds: _sessionSeconds,
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
 

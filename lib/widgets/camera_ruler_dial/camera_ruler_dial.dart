@@ -37,10 +37,6 @@ class CameraRulerDial extends StatefulWidget {
   /// Enables fling inertia after drag release.
   final bool enableInertia;
 
-  // fadeColor is kept for API compatibility but not used in rendering —
-  // fading is handled per-tick in _TicksPainter.
-  final Color fadeColor;
-
   /// Icons shown at the left (min) and right (max) ends.
   final Widget? leftIcon;
   final Widget? rightIcon;
@@ -51,7 +47,6 @@ class CameraRulerDial extends StatefulWidget {
     required this.initialValue,
     required this.onChanged,
     this.enableInertia = false,
-    this.fadeColor = Colors.black,
     this.leftIcon,
     this.rightIcon,
   });
@@ -184,97 +179,107 @@ class _CameraRulerDialState extends State<CameraRulerDial> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // Composite: surface @ 82% over black camera preview → single opaque colour.
+    final overlayBg = cs.surface.withValues(alpha: 0.82);
+
     final style = widget.config.style;
     final layout = style.layout;
-    return SizedBox(
-      height: layout.totalHeight,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Tick index 0 position in inner-zone local coordinates.
-          // Pixel-aligned so each tick falls on a whole physical pixel —
-          // prevents sub-pixel AA blur on vertical lines.
-          final dpr = MediaQuery.of(context).devicePixelRatio;
-          final rawOffset =
-              constraints.maxWidth / 2 -
-              _visualIndex * layout.tickSpacing -
-              layout.iconPad;
-          final rulerOffset = (rawOffset * dpr).roundToDouble() / dpr;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(100),
+      child: ColoredBox(
+        color: overlayBg,
+        child: SizedBox(
+          height: layout.totalHeight,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Tick index 0 position in inner-zone local coordinates.
+              // Pixel-aligned so each tick falls on a whole physical pixel —
+              // prevents sub-pixel AA blur on vertical lines.
+              final dpr = MediaQuery.of(context).devicePixelRatio;
+              final rawOffset =
+                  constraints.maxWidth / 2 -
+                  _visualIndex * layout.tickSpacing -
+                  layout.iconPad;
+              final rulerOffset = (rawOffset * dpr).roundToDouble() / dpr;
 
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onHorizontalDragUpdate: (d) {
-              if (widget.enableInertia) _trackVelocity(d.delta.dx);
-              _updateDrag(d.delta.dx);
-            },
-            onHorizontalDragEnd: (_) => _onDragEnd(),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Ruler zone — clipped so ticks never render over end icons.
-                Positioned(
-                  left: layout.iconPad,
-                  right: layout.iconPad,
-                  top: 0,
-                  bottom: 0,
-                  child: ClipRect(
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Positioned.fill(
-                          child: CustomPaint(
-                            painter: _TicksPainter(
-                              config: widget.config,
-                              rulerOffset: rulerOffset,
-                              dpr: dpr,
-                            ),
-                          ),
-                        ),
-                        Positioned.fill(
-                          child: IgnorePointer(
-                            child: CustomPaint(
-                              painter: _LabelsPainter(
-                                config: widget.config,
-                                visualIndex: _visualIndex,
-                                rulerOffset: rulerOffset,
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: (d) {
+                  if (widget.enableInertia) _trackVelocity(d.delta.dx);
+                  _updateDrag(d.delta.dx);
+                },
+                onHorizontalDragEnd: (_) => _onDragEnd(),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Ruler zone — clipped so ticks never render over end icons.
+                    Positioned(
+                      left: layout.iconPad,
+                      right: layout.iconPad,
+                      top: 0,
+                      bottom: 0,
+                      child: ClipRect(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: _TicksPainter(
+                                  config: widget.config,
+                                  rulerOffset: rulerOffset,
+                                  dpr: dpr,
+                                ),
                               ),
                             ),
-                          ),
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _LabelsPainter(
+                                    config: widget.config,
+                                    visualIndex: _visualIndex,
+                                    rulerOffset: rulerOffset,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
 
-                // Centre indicator — bottom: 3 creates a small gap beneath ticks.
-                Positioned(
-                  top: 0,
-                  bottom: style.indicator.bottomInset,
-                  left: layout.iconPad,
-                  right: layout.iconPad,
-                  child: Align(
-                    alignment: Alignment.bottomCenter,
-                    child: _Indicator(style: style),
-                  ),
-                ),
+                    // Centre indicator — bottom: 3 creates a small gap beneath ticks.
+                    Positioned(
+                      top: 0,
+                      bottom: style.indicator.bottomInset,
+                      left: layout.iconPad,
+                      right: layout.iconPad,
+                      child: Align(
+                        alignment: Alignment.bottomCenter,
+                        child: _Indicator(style: style),
+                      ),
+                    ),
 
-                if (widget.leftIcon != null)
-                  Positioned(
-                    left: layout.iconInset,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(child: widget.leftIcon!),
-                  ),
-                if (widget.rightIcon != null)
-                  Positioned(
-                    right: layout.iconInset,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(child: widget.rightIcon!),
-                  ),
-              ],
-            ),
-          );
-        },
+                    if (widget.leftIcon != null)
+                      Positioned(
+                        left: layout.iconInset,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(child: widget.leftIcon!),
+                      ),
+                    if (widget.rightIcon != null)
+                      Positioned(
+                        right: layout.iconInset,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(child: widget.rightIcon!),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
       ),
     );
   }

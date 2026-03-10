@@ -33,7 +33,10 @@ class BottomInfoBar extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Container(
       height: 36,
-      color: cs.surfaceContainer,
+      decoration: BoxDecoration(
+        color: cs.surfaceContainer,
+        border: Border(top: BorderSide(color: cs.outlineVariant, width: 1)),
+      ),
       child: Row(
         children: [
           const SizedBox(width: 12),
