@@ -74,6 +74,7 @@ class _CameraScreenState extends State<CameraScreen> {
   // ── UI state ──────────────────────────────────────────────────────
   bool _isScanning = false;
   bool _showCanvas = false;
+  bool _showCameraFull = false;
   bool _settingsDrawerOpen = false;
 
   /// Last WB-lock value that was *confirmed* by native (before any pending
@@ -279,6 +280,8 @@ class _CameraScreenState extends State<CameraScreen> {
         content: Text(msg),
         backgroundColor: Colors.red[900],
         duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
       ),
     );
   }
@@ -290,6 +293,8 @@ class _CameraScreenState extends State<CameraScreen> {
         content: Text(msg),
         backgroundColor: Colors.orange[900],
         duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
       ),
     );
   }
@@ -464,40 +469,77 @@ class _CameraScreenState extends State<CameraScreen> {
               // Canvas — always the base layer (scrollable infinite plane)
               const Positioned.fill(child: CanvasView()),
 
-              // Camera preview window — centered, 60 % of screen width.
-              // Hidden in canvas-only mode.
-              if (!_showCanvas && _permissionGranted)
-                Positioned(
-                  top: 44,
-                  bottom: 80,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: FractionallySizedBox(
-                      widthFactor: 0.6,
-                      child: AspectRatio(
-                        aspectRatio: 4 / 3,
-                        child: GestureDetector(
-                          onTap: _cameraStarted ? _lockWb : null,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: cs.primary.withValues(alpha: 0.8),
-                                width: 2,
+              // Single camera PlatformViewLink kept at a fixed widget-tree
+              // position.  AnimatedPositioned resizes it between the small
+              // center window and full-screen without ever unmounting the
+              // view, avoiding spurious camera session teardown.
+              if (_permissionGranted && !_showCanvas)
+                Positioned.fill(
+                  child: LayoutBuilder(
+                    builder: (_, constraints) {
+                      const topBarH = 44.0;
+                      const bottomBarH = 80.0;
+                      final availH =
+                          constraints.maxHeight - topBarH - bottomBarH;
+                      final isSmall = !_showCameraFull;
+                      final camW = isSmall
+                          ? constraints.maxWidth * 0.6
+                          : constraints.maxWidth;
+                      final camH = isSmall
+                          ? (camW * 3 / 4).clamp(0.0, availH)
+                          : constraints.maxHeight;
+                      final camLeft = isSmall
+                          ? (constraints.maxWidth - camW) / 2
+                          : 0.0;
+                      final camTop = isSmall
+                          ? topBarH + (availH - camH).clamp(0.0, availH) / 2
+                          : 0.0;
+                      return Stack(
+                        children: [
+                          AnimatedPositioned(
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeInOutCubic,
+                            left: camLeft,
+                            top: camTop,
+                            width: camW,
+                            height: camH,
+                            child: GestureDetector(
+                              onTap: _cameraStarted
+                                  ? (isSmall
+                                        ? () => setState(() {
+                                            _showCameraFull = true;
+                                            _showCanvas = false;
+                                          })
+                                        : _lockWb)
+                                  : null,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                decoration: isSmall
+                                    ? BoxDecoration(
+                                        border: Border.all(
+                                          color: cs.primary.withValues(
+                                            alpha: 0.8,
+                                          ),
+                                          width: 2,
+                                        ),
+                                        borderRadius: BorderRadius.circular(8),
+                                      )
+                                    : null,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(
+                                    isSmall ? 6 : 0,
+                                  ),
+                                  child: _buildCameraPreview(),
+                                ),
                               ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: _buildCameraPreview(),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
+                        ],
+                      );
+                    },
                   ),
                 )
-              else if (!_showCanvas)
+              else if (!_showCanvas && !_permissionGranted)
                 Positioned(
                   top: 44,
                   bottom: 80,
@@ -529,12 +571,19 @@ class _CameraScreenState extends State<CameraScreen> {
                 ),
               ),
 
-              // MiniMap — top right, hidden in canvas-only mode
-              if (!_showCanvas)
+              // MiniMap — top right, hidden in canvas-only or full-camera mode.
+              // Tapping it switches to canvas view.
+              if (!_showCanvas && !_showCameraFull)
                 Positioned(
                   top: 44,
                   right: 8,
-                  child: MiniMap(frameCount: _info.frameCount),
+                  child: MiniMap(
+                    frameCount: _info.frameCount,
+                    onTap: () => setState(() {
+                      _showCanvas = true;
+                      _showCameraFull = false;
+                    }),
+                  ),
                 ),
 
               // All bottom controls pinned to the bottom of the screen
@@ -576,10 +625,17 @@ class _CameraScreenState extends State<CameraScreen> {
                             InteractiveBottomBar(
                               isScanning: _isScanning,
                               showCanvas: _showCanvas,
+                              showCameraFull: _showCameraFull,
                               isSettingsOpen: _settingsDrawerOpen,
                               onToggleScan: _toggleScan,
-                              onToggleCanvas: () =>
-                                  setState(() => _showCanvas = !_showCanvas),
+                              onToggleCanvas: () => setState(() {
+                                _showCanvas = !_showCanvas;
+                                if (_showCanvas) _showCameraFull = false;
+                              }),
+                              onToggleCameraFull: () => setState(() {
+                                _showCameraFull = !_showCameraFull;
+                                if (_showCameraFull) _showCanvas = false;
+                              }),
                               onToggleSettings: _toggleSettingsDrawer,
                               onReset: _onReset,
                               onExport: _onExport,

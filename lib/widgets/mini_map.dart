@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 /// with a viewport rectangle representing the current camera view.
 class MiniMap extends StatelessWidget {
   final int frameCount;
+  final VoidCallback? onTap;
 
   // Viewport rect as a fraction of the total canvas [0..1]
   final Rect viewportFraction;
@@ -12,6 +13,7 @@ class MiniMap extends StatelessWidget {
   const MiniMap({
     super.key,
     this.frameCount = 0,
+    this.onTap,
     this.viewportFraction = const Rect.fromLTWH(0.3, 0.3, 0.4, 0.4),
   });
 
@@ -21,76 +23,82 @@ class MiniMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      width: _kWidth,
-      height: _kHeight,
-      decoration: BoxDecoration(
-        color: cs.surface,
-        border: Border.all(color: cs.primary, width: 1.5),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(3),
-        child: Stack(
-          children: [
-            // Downsampled stitched image background
-            Positioned.fill(
-              child: Image.asset(
-                'scripts/tmp_files/r04_c04.png',
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => ColoredBox(
-                  color: cs.surfaceContainer,
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            ),
-
-            // Viewport rect overlay
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _ViewportPainter(
-                  viewportFraction: viewportFraction,
-                  viewportColor: cs.tertiary,
-                ),
-              ),
-            ),
-
-            // Top label
-            Positioned(
-              top: 4,
-              left: 6,
-              child: Text(
-                'MOSAIC PREVIEW',
-                style: TextStyle(
-                  fontSize: 8,
-                  fontWeight: FontWeight.w600,
-                  color: cs.primary,
-                  letterSpacing: 1.4,
-                ),
-              ),
-            ),
-
-            // Frame count badge
-            Positioned(
-              bottom: 4,
-              right: 6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainer,
-                  borderRadius: BorderRadius.circular(3),
-                ),
-                child: Text(
-                  '$frameCount frames',
-                  style: TextStyle(
-                    fontSize: 8,
-                    color: cs.outline,
-                    fontFamily: 'monospace',
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: _kWidth,
+        height: _kHeight,
+        decoration: BoxDecoration(
+          color: cs.surface,
+          border: Border.all(color: cs.primary, width: 1.5),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: Stack(
+            children: [
+              // Downsampled stitched image background
+              Positioned.fill(
+                child: Image.asset(
+                  'scripts/tmp_files/r04_c04.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => ColoredBox(
+                    color: cs.surfaceContainer,
+                    child: const SizedBox.expand(),
                   ),
                 ),
               ),
-            ),
-          ],
+
+              // Viewport rect overlay
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _ViewportPainter(
+                    viewportFraction: viewportFraction,
+                    viewportColor: cs.tertiary,
+                  ),
+                ),
+              ),
+
+              // Top label
+              Positioned(
+                top: 4,
+                left: 6,
+                child: Text(
+                  'MOSAIC PREVIEW',
+                  style: TextStyle(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w600,
+                    color: cs.primary,
+                    letterSpacing: 1.4,
+                  ),
+                ),
+              ),
+
+              // Frame count badge
+              Positioned(
+                bottom: 4,
+                right: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainer,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(
+                    '$frameCount frames',
+                    style: TextStyle(
+                      fontSize: 8,
+                      color: cs.outline,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
