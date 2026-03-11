@@ -14,6 +14,7 @@ Flutter / Dart  ←→  Kotlin (CameraX + Camera2)  ←→  C++ / OpenCV (Phase 
 | --------------- | ------------------------------------------------------------ | ----------------------- |
 | Flutter UI      | `lib/`                                                       | in progress             |
 | Flutter widgets | `lib/widgets/`                                               | in progress             |
+| Camera state    | `lib/camera/`                                                | done                    |
 | Kotlin camera   | `android/app/src/main/kotlin/com/example/eva_minimal_demo/`  | done                    |
 | C++ stitching   | JNI placeholder in `CameraManager.kt` ImageAnalysis callback | **not yet implemented** |
 
@@ -22,7 +23,7 @@ Flutter / Dart  ←→  Kotlin (CameraX + Camera2)  ←→  C++ / OpenCV (Phase 
 Three fixed channels defined in `MainActivity.kt`:
 
 - **`PlatformView "camerax-preview"`** — embeds native `PreviewView` directly into Flutter widget tree via `CameraPreviewFactory`
-- **`MethodChannel "com.example.eva/control"`** — camera commands: `startCamera`, `stopCamera`, `saveFrame`, `lockWhiteBalance`, `setAfEnabled`, `setAeEnabled`, `setExposureOffset`, `setFocusDistance`, `setZoomRatio`, etc.
+- **`MethodChannel "com.example.eva/control"`** — camera commands: `startCamera`, `stopCamera`, `saveFrame`, `lockWhiteBalance`, `unlockWhiteBalance`, `setAfEnabled`, `setAeEnabled`, `setExposureOffset`, `setFocusDistance`, `setZoomRatio`, `setIso`, `setExposureTimeNs`, etc.
 - **`EventChannel "com.example.eva/events"`** — pushes `{frameCount, fps}` map to Dart every 500 ms
 
 ## CameraX Configuration (Critical Details)
@@ -54,16 +55,27 @@ Key stitching decisions from the docs:
 - Blending weights computed in **global panorama coordinates** (not tile-local) to prevent seams at tile boundaries
 - Blur rejection: gradient energy on downsampled frame (~0.1 ms) → FAST feature count gate → optical flow residual check
 
+## Camera State Layer (`lib/camera/`)
+
+- **`camera_state.dart`** — immutable data classes: `CameraValues` (user-controlled settings), `CameraRanges` (device capability limits), `CameraInfo` (live telemetry), `CameraCallbacks` (bundled action callbacks). `CameraSettingType` enum (`iso`, `shutter`, `focus`, `wb`, `zoom`). `CameraValues.initialFromRanges()` provides startup defaults.
+- **`camera_settings_queue.dart`** — latest-wins queue that serializes native Camera2 writes. Prevents rapid slider scrubs from piling up and causing `CancellationException`. AF-disable-before-manual-focus is enforced in queue order. **Camera2 `setCaptureRequestOptions` cancels prior pending futures — settings must be sent sequentially, never via `Future.wait`.**
+- **`camera_control.dart`** — MethodChannel wrappers for camera commands.
+
 ## Flutter UI Structure
 
-`lib/main.dart` is the entry point. UI is split into focused stateless/stateful widgets under `lib/widgets/`. No state management framework — plain `StatefulWidget` + `setState` or `ValueNotifier` as needed.
+`lib/main.dart` is the entry point. UI is split into focused stateless/stateful widgets under `lib/widgets/`. No state management framework — plain `StatefulWidget` + `setState` or `ValueNotifier` as needed. Material 3 dark color theme — colors via `Theme.of(context).colorScheme` (not hardcoded constants).
 
-Key widget patterns from staging files in `scripts/tmp_files/`:
+Key widgets:
 
-- **`SideButton`** (`lib/side_button.dart`) — icon + label button with `isActive` (left-border highlight), `isDisabled`, `isLarge`, and optional `color` props. Default color is white (overlaid on camera preview).
-- **`GlassToolbar`** (`lib/widgets/glass_toolbar.dart`) — 80 px wide right-side panel using `BackdropFilter` blur + semi-transparent black (`Colors.black.withOpacity(0.3)`). Contains scan start/stop, finalize, reset, AF lock, AE lock, and debug buttons as `SideButton` children.
+- **`SideButton`** (`lib/widgets/side_button.dart`) — icon + label button with `isActive` (left-border highlight), `isDisabled`, `isLarge`, and optional `color` props. Default color is white (overlaid on camera preview).
+- **`LeftToolbar`** (`lib/widgets/left_toolbar.dart`) — left-side panel with scan/finalize/reset/AF/AE controls.
+- **`CameraControlOverlay`** (`lib/widgets/camera_control_overlay.dart`) — floating dial/slider overlays for ISO, shutter, focus, WB, zoom.
+- **`CameraRulerDial`** (`lib/widgets/camera_ruler_dial/`) — ruler-style dial for precise camera setting adjustment.
+- **`BottomInfoBar`** (`lib/widgets/bottom_info_bar.dart`) — status bar with FPS, frame count, and live telemetry.
+- **`MiniMap`** (`lib/widgets/mini_map.dart`) — small preview of the stitched canvas.
+- **`CanvasView`** (`lib/widgets/canvas_view.dart`) — large canvas preview for stitched output.
 
-The main screen overlays `GlassToolbar` on top of the native camera `PlatformView`.
+The main screen overlays these widgets on top of the native camera `PlatformView`.
 
 ## OpenCV Integration
 
@@ -82,7 +94,9 @@ flutter run                          # run on connected Android device
 flutter build apk                    # build release APK
 ```
 
-Target and minimum Android API: **34**. CameraX `1.4.0` requires API 21+; Camera2 interop metadata (`TotalCaptureResult` color/focus fields) requires API 28+ in practice.
+Target and minimum Android API: **34**. CameraX `1.5.3` requires API 21+; Camera2 interop metadata (`TotalCaptureResult` color/focus fields) requires API 28+ in practice.
+
+Gradle **8.12**, AGP **8.9.x**, NDK **27.0.12077973**, C++17.
 
 ## Key Files
 
@@ -90,6 +104,8 @@ Target and minimum Android API: **34**. CameraX `1.4.0` requires API 21+; Camera
 | ------------------------------------------------ | ------------------------------------------------------ |
 | `android/app/src/main/kotlin/…/CameraManager.kt` | All camera logic, WB lock, FPS events, JNI placeholder |
 | `android/app/src/main/kotlin/…/MainActivity.kt`  | Channel wiring, permission handling                    |
+| `lib/camera/camera_state.dart`                   | Immutable camera data classes and enums                |
+| `lib/camera/camera_settings_queue.dart`          | Latest-wins queue for serialized Camera2 writes        |
 | `docs/PLAN_ARCH.md`                              | Full requirements and algorithm design                 |
 | `docs/Chunked_canvas_implementation_details.md`  | C++ tile data structures and pyramid blending          |
 | `docs/Tiny_chunks_canvas.md`                     | Stitching pipeline flow diagram                        |
@@ -98,42 +114,54 @@ Target and minimum Android API: **34**. CameraX `1.4.0` requires API 21+; Camera
 
 ## Rules and Conventions
 
-### General
+### Design Philosophy
 
-- **Minimal and lightweight**: prefer the simplest solution that works. Do not add abstractions, layers, or dependencies unless clearly necessary. Ask the user for preference. Give suggestions and ask before adding depth to design.
-- **No state management frameworks**: use plain `StatefulWidget` + `setState`. Use `ValueNotifier` only when sharing state across widgets that can't easily share a parent.
-- One widget per file. Keep files short and focused. Try to keep the files 300 lines or less. If a file grows beyond that, consider if it can be split into multiple widgets or if some logic can be moved out.
-- Use context7 MCP to fetch documentation when unsure about API usage or best practices or when implementing new features.
-- If a question is asked, do not start implementing until the question is answered. Ask the user if they want to implement it. If you don't know the answer, say you don't know and suggest how to find the answer (e.g. search terms, MCP servers, documentation sections, etc). Do not make assumptions or guesses about things you are unsure of.
-- Add to the changelog in `CHANGELOG.md` every time a feature, algorithm or implementation is added, modified, deleted or reverted, with a brief description and the date. Maximum three lines per implementation. This will help keep track of the history of changes and the rationale behind them.
-- **NEVER pipe or redirect terminal output to suppress or truncate it** — do not append `2>&1 | tail -N`, `| tail -N`, `| head -N`, `> /dev/null`, or any other form of output suppression or truncation to any command. ALWAYS let commands print their full output directly to the terminal. If filtering is needed, redirect a copy of stdout/stderr to a file in `scripts/tmp_files/` and then read that file.
-- Create all tmp files in `scripts/tmp_files/` and delete them after use. Do not use heredoc syntax for terminal commands.
+> **CONSTRAINT**: Prefer the simplest solution that works. Do not add abstractions, layers, or dependencies unless clearly necessary. Ask the user for preference before adding depth to design.
+
+> **CONSTRAINT**: If a question is asked, do not start implementing until the question is answered. If you don't know the answer, say so and suggest how to find it (search terms, MCP servers, documentation sections). Do not guess.
+
+> **CONSTRAINT**: Use Context7 MCP (`io.github.stash/context7`) to fetch documentation when unsure about API usage, best practices, or when implementing new features. See `.github/instructions/context7.instructions.md`.
 
 ### Flutter / Dart
 
-- Widgets go in `lib/widgets/`. Entry point is `lib/main.dart`. Reusable single-file primitives (like `SideButton`) live directly in `lib/`.
-- Prefer `StatelessWidget` by default; only use `StatefulWidget` when local mutable state is genuinely needed.
-- Pass callbacks down explicitly (no global state, no `InheritedWidget` unless the tree depth makes it painful).
-- UI overlays the native camera `PlatformView` — keep widget trees shallow to avoid compositing overhead.
+- **State management**: Plain `StatefulWidget` + `setState`. No frameworks (Provider, Riverpod, etc.). Use `ValueNotifier` only for cross-widget state that can't share a parent.
+- **Widget location**: All widgets in `lib/widgets/`. Entry point is `lib/main.dart`.
+- **Widget preference**: `StatelessWidget` by default; `StatefulWidget` only when local mutable state is genuinely needed.
+- **File size**: One widget per file. Target ≤ 300 lines. Split or extract logic if larger.
+- **Data flow**: Pass callbacks down explicitly. No global state, no `InheritedWidget` unless tree depth makes it painful.
+- **Compositing**: UI overlays native camera `PlatformView` — keep widget trees shallow to avoid compositing overhead.
+- **Theme**: Material 3 dark color theme. Use `Theme.of(context).colorScheme` — never hardcode color constants.
+
+- **Material 3 Components** - use Material 3 components and theming. For example, use `ElevatedButton`, `FilterChip`, and `ThemeData.colorScheme` for colors instead of hardcoded values.
 
 ### Kotlin / Android
 
-- All camera logic stays in `CameraManager.kt`. Do not scatter camera state into `MainActivity.kt`.
-- New MethodChannel commands go in `MainActivity.kt`'s `when` block; implement the logic in `CameraManager.kt`.
+- **Camera logic**: All camera logic stays in `CameraManager.kt`. Do **not** scatter camera state into `MainActivity.kt`.
+- **New commands**: New MethodChannel commands → add to `MainActivity.kt`'s `when` block, implement logic in `CameraManager.kt`.
+- **Settings writes**: Always go through `applyAllCaptureOptions()`. Never set capture options individually.
 
 ### C++ / OpenCV (Phase 2)
 
-- New JNI source files go in `android/app/src/main/cpp/`. Wire them up via `externalNativeBuild` in `android/app/build.gradle.kts`.
-- Use OpenCV C++ API, not Java bindings — the native library is already at `android/opencv/`.
-- Prefer in-place operations and pre-allocated buffers to minimize allocations per frame.
-- **OpenCV CPU-only** Do not use GPU methods or mats: no `cv::cuda::`, `cv::ocl::`, or OpenCL calls.
+- **Source location**: New JNI source files → `android/app/src/main/cpp/`. Wire via `externalNativeBuild` in `android/app/build.gradle.kts`.
+- **API choice**: Use OpenCV C++ API, not Java bindings — native library is at `android/opencv/`.
+- **Memory**: Prefer in-place operations and pre-allocated buffers to minimize per-frame allocations.
+- **GPU forbidden**: No `cv::cuda::`, `cv::ocl::`, or OpenCL calls. OpenCV is CPU-only in this project.
+
+### Build
+
+- **ABI**: **Only `arm64-v8a`** — no x86/armeabi-v7a support.
+- **Java**: **Java 17 required** — Java 25+ breaks Gradle/AGP 8.9.x.
 
 ### Terminal / Tooling
 
-- Never use heredoc syntax in terminal commands — they fail in this environment. Instead write to a file in `scripts/tmp_files/` using file tools, run it, then delete it.
-- **NEVER truncate terminal output** — do not append `| head`, `| tail`, `2>&1 | tail`, or any output suppression to any command, including long-running ones like `flutter build apk`. Full output must always be visible.
+> **DO NOT**: Pipe or redirect terminal output to suppress or truncate it. No `| tail`, `| head`, `2>&1 | tail`, `> /dev/null`, or any output suppression. Always let commands print full output.
 
-### build
+> **DO NOT**: Use heredoc syntax in terminal commands — they fail in this environment.
 
-- **Only `arm64-v8a` ABI** is built — no x86/armeabi-v7a support
-- **Java 17 required** — Java 25+ breaks Gradle/AGP 8.9.x
+> **DO**: Create all tmp files in `scripts/tmp_files/` and delete them after use.
+
+> **DO**: If editing fails or a file appears corrupted, write intended contents to a new file, delete the original, then rename the new file to the original path.
+
+### Changelog
+
+> **ALWAYS**: Update `CHANGELOG.md` when a feature, algorithm, or implementation is added, modified, deleted, or reverted. Include date + brief description. Maximum three lines per entry.
