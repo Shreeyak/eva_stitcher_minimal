@@ -429,7 +429,6 @@ class _CameraScreenState extends State<CameraScreen> {
       _isScanning = false;
       _stitchedCount = 0;
       _sessionSeconds = 0;
-      _showCanvas = false;
     });
     _sessionTimer?.cancel();
   }
@@ -462,19 +461,56 @@ class _CameraScreenState extends State<CameraScreen> {
           right: false,
           child: Stack(
             children: [
-              // Camera preview (always rendered behind everything)
-              if (_permissionGranted)
-                Positioned.fill(
-                  child: GestureDetector(
-                    onTap: _cameraStarted ? _lockWb : null,
-                    child: _buildCameraPreview(),
+              // Canvas — always the base layer (scrollable infinite plane)
+              const Positioned.fill(child: CanvasView()),
+
+              // Camera preview window — centered, 60 % of screen width.
+              // Hidden in canvas-only mode.
+              if (!_showCanvas && _permissionGranted)
+                Positioned(
+                  top: 44,
+                  bottom: 80,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: FractionallySizedBox(
+                      widthFactor: 0.6,
+                      child: AspectRatio(
+                        aspectRatio: 4 / 3,
+                        child: GestureDetector(
+                          onTap: _cameraStarted ? _lockWb : null,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: cs.primary.withValues(alpha: 0.8),
+                                width: 2,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: _buildCameraPreview(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 )
-              else
-                Center(
-                  child: Text(
-                    'Camera permission required',
-                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 16),
+              else if (!_showCanvas)
+                Positioned(
+                  top: 44,
+                  bottom: 80,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Text(
+                      'Camera permission required',
+                      style: TextStyle(
+                        color: cs.onSurfaceVariant,
+                        fontSize: 16,
+                      ),
+                    ),
                   ),
                 ),
 
@@ -493,15 +529,13 @@ class _CameraScreenState extends State<CameraScreen> {
                 ),
               ),
 
-              // Canvas overlay (toggled by toolbar)
-              if (_showCanvas) const Positioned.fill(child: CanvasView()),
-
-              // MiniMap — top right
-              Positioned(
-                top: 44, // Shifted down to accommodate the top status bar
-                right: 8,
-                child: MiniMap(frameCount: _info.frameCount),
-              ),
+              // MiniMap — top right, hidden in canvas-only mode
+              if (!_showCanvas)
+                Positioned(
+                  top: 44,
+                  right: 8,
+                  child: MiniMap(frameCount: _info.frameCount),
+                ),
 
               // All bottom controls pinned to the bottom of the screen
               Positioned(
@@ -541,8 +575,11 @@ class _CameraScreenState extends State<CameraScreen> {
                           if (_cameraStarted)
                             InteractiveBottomBar(
                               isScanning: _isScanning,
+                              showCanvas: _showCanvas,
                               isSettingsOpen: _settingsDrawerOpen,
                               onToggleScan: _toggleScan,
+                              onToggleCanvas: () =>
+                                  setState(() => _showCanvas = !_showCanvas),
                               onToggleSettings: _toggleSettingsDrawer,
                               onReset: _onReset,
                               onExport: _onExport,
@@ -550,10 +587,7 @@ class _CameraScreenState extends State<CameraScreen> {
                               onSettingChipTap: _onSettingChipTap,
                               values: _values,
                               callbacks: _callbacks,
-                              showCanvas: _showCanvas,
                               canExport: false,
-                              onToggleCanvas: () =>
-                                  setState(() => _showCanvas = !_showCanvas),
                             ),
                         ],
                       ),

@@ -143,7 +143,6 @@ class _MainActionBar extends StatelessWidget {
           ),
 
           const SizedBox(width: 32),
-          // Other buttons to the right of settings
           BottomBarActionButton(
             icon: showCanvas ? Icons.grid_view : Icons.grid_view_outlined,
             label: 'CANVAS',

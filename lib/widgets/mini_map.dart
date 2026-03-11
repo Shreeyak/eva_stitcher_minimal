@@ -33,14 +33,26 @@ class MiniMap extends StatelessWidget {
         borderRadius: BorderRadius.circular(3),
         child: Stack(
           children: [
-            // Grid background
-            CustomPaint(
-              painter: _MiniMapPainter(
-                viewportFraction: viewportFraction,
-                gridColor: cs.surfaceContainer,
-                viewportColor: cs.tertiary,
+            // Downsampled stitched image background
+            Positioned.fill(
+              child: Image.asset(
+                'scripts/tmp_files/r04_c04.png',
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => ColoredBox(
+                  color: cs.surfaceContainer,
+                  child: const SizedBox.expand(),
+                ),
               ),
-              child: const SizedBox.expand(),
+            ),
+
+            // Viewport rect overlay
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _ViewportPainter(
+                  viewportFraction: viewportFraction,
+                  viewportColor: cs.tertiary,
+                ),
+              ),
             ),
 
             // Top label
@@ -87,39 +99,17 @@ class MiniMap extends StatelessWidget {
 
 // ── Painter ───────────────────────────────────────────────────────────────────
 
-class _MiniMapPainter extends CustomPainter {
+class _ViewportPainter extends CustomPainter {
   final Rect viewportFraction;
-  final Color gridColor;
   final Color viewportColor;
 
-  const _MiniMapPainter({
+  const _ViewportPainter({
     required this.viewportFraction,
-    required this.gridColor,
     required this.viewportColor,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    const spacing = 16.0;
-
-    final gridPaint = Paint()
-      ..color = gridColor
-      ..strokeWidth = 0.5;
-
-    // Vertical lines
-    var x = 0.0;
-    while (x <= size.width) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-      x += spacing;
-    }
-
-    // Horizontal lines
-    var y = 0.0;
-    while (y <= size.height) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-      y += spacing;
-    }
-
     // Viewport rect
     final vpRect = Rect.fromLTWH(
       viewportFraction.left * size.width,
@@ -147,8 +137,7 @@ class _MiniMapPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_MiniMapPainter old) =>
+  bool shouldRepaint(_ViewportPainter old) =>
       old.viewportFraction != viewportFraction ||
-      old.gridColor != gridColor ||
       old.viewportColor != viewportColor;
 }
