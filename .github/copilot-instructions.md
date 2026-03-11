@@ -118,7 +118,7 @@ Gradle **8.12**, AGP **8.9.x**, NDK **27.0.12077973**, C++17.
 
 > **CONSTRAINT**: Prefer the simplest solution that works. Do not add abstractions, layers, or dependencies unless clearly necessary. Ask the user for preference before adding depth to design.
 
-> **CONSTRAINT**: If a question is asked, do not start implementing until the question is answered. If you don't know the answer, say so and suggest how to find it (search terms, MCP servers, documentation sections). Do not guess.
+> **CONSTRAINT**: If a question is asked, wait until the question is answered before you start implementing. If you don't know the answer, say so and suggest how to find it (search terms, MCP servers, documentation sections). Do not guess.
 
 > **CONSTRAINT**: Use Context7 MCP (`io.github.stash/context7`) to fetch documentation when unsure about API usage, best practices, or when implementing new features. See `.github/instructions/context7.instructions.md`.
 
@@ -156,7 +156,7 @@ Gradle **8.12**, AGP **8.9.x**, NDK **27.0.12077973**, C++17.
 
 > **DO NOT**: Pipe or redirect terminal output to suppress or truncate it. No `| tail`, `| head`, `2>&1 | tail`, `> /dev/null`, or any output suppression. Always let commands print full output.
 
-> **DO NOT**: Use heredoc syntax in terminal commands — they fail in this environment.
+- **CRITICAL CONSTRAINT: YOU MUST NEVER use heredoc** (cat << EOF), echo, or bash string manipulation to write multi-line code. If you need to create or modify a script, YOU MUST physically use the 'create_file' or 'replace_string_in_file' tools. Violating this breaks the environment.
 
 > **DO**: Create all tmp files in `scripts/tmp_files/` and delete them after use.
 

@@ -11,6 +11,8 @@ scripts/**/*.csv
 scripts/tmp_files/**
 .vscode/
 /*.png
+android/.kotlin/
+android/.gradle/
 
 # Miscellaneous
 pubspec.lock

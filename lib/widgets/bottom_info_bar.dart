@@ -35,9 +35,8 @@ class BottomInfoBar extends StatelessWidget {
       height: 36,
       decoration: BoxDecoration(color: cs.surfaceContainerLowest),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          const SizedBox(width: 12),
-
           // Status badge
           _StatusBadge(isScanning: isScanning),
           const SizedBox(width: 16),
