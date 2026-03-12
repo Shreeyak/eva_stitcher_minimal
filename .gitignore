@@ -8,9 +8,12 @@ scripts/**/*.png
 scripts/**/*.jpg
 scripts/**/*.jpeg
 scripts/**/*.csv
-scripts/tmp_files/**
+scripts/tmp_files/*
+!scripts/tmp_files/.gitkeep
 .vscode/
 /*.png
+android/.kotlin/
+android/.gradle/
 
 # Miscellaneous
 pubspec.lock

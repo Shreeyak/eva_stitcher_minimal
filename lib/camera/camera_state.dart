@@ -46,15 +46,15 @@ class CameraValues {
   /// Edit defaults here — not scattered across `_startCamera()`.
   factory CameraValues.initialFromRanges(CameraRanges ranges) {
     return CameraValues(
-      isoValue: ranges.isoRange[0].clamp(200, ranges.isoRange[1]),
-      exposureTimeNs: ranges.exposureTimeRangeNs[0].clamp(
-        1000000,
+      isoValue: 800.clamp(ranges.isoRange[0], ranges.isoRange[1]),
+      exposureTimeNs: 20000000.clamp(
+        ranges.exposureTimeRangeNs[0],
         ranges.exposureTimeRangeNs[1],
       ),
-      // Focus starts at infinity (0.0 diopters). AF is enabled at startup so this
-      // value is unused until the user disables AF. Starting at ∞ avoids any
+      // Focus starts near infinity (0.0 diopters). AF is enabled at startup so this
+      // value is unused until the user disables AF. Starting near ∞ avoids any
       // abrupt lens movement when AF is first toggled off.
-      focusDistance: 0.0,
+      focusDistance: 0.1,
       zoomRatio: ranges.minZoomRatio,
       afEnabled: true,
       wbLocked: false,

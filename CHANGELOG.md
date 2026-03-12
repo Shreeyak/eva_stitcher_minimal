@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-03-13 (update 42)
+
+### Asset Migration
+
+- Updated `MiniMap` and `CanvasView` to use the `assets/r04_c04.png` (registered in `pubspec.yaml`) instead of the temporary path in `scripts/tmp_files/`.
+
+## 2026-03-13 (update 41)
+
+### Bottom bar simplification
+
+- Removed the `CAMERA` action button from `InteractiveBottomBar` and deleted its related widget props/callback wiring from `main.dart`.
+- Removed `_showCameraFull` and all full-camera-mode behavior (toggle paths, size/position branching, and minimap visibility branching) from `main.dart`.
+
+## 2026-03-12 (update 40)
+
+### Instruction stack restructure per GitHub official guidelines
+
+- Restructured `copilot-instructions.md`: compressed from ~180 to ~90 lines with essential info inline (not a router). Removed LeftToolbar reference, updated widget list, merged Build/Terminal subsections.
+- Trimmed `context7.instructions.md` (~95→28 lines) and `self-explanatory-code-commenting.instructions.md` (~150→12 lines); removed JS examples and generic advice LLMs already know.
+- Enhanced `code-review.instructions.md` with project-specific critical invariants checklist (Camera2 atomic writes, CameraSettingsQueue, theme compliance, widget conventions).
+
+## 2026-03-11 (update 39)
+
+### Canvas-first layout with floating camera preview window
+
+- Canvas (`CanvasView`) is now the permanent base layer instead of an optional overlay.
+- `CanvasView` refactored to use `InteractiveViewer` for pan/zoom, rendering a 6000×6000 logical canvas with background → grid → stitched-image stack. Mockup image (`scripts/tmp_files/r04_c04.png`) registered as a Flutter asset.
+- Camera preview moved from full-screen fill to a centered, framed window: 60 % of screen width, 4:3 aspect ratio, with rounded border using `cs.primary`.
+- `_showCanvas` state, `onToggleCanvas` callback, and the CANVAS button remain in `main.dart`/`InteractiveBottomBar`; the new canvas-first layout is layered on top of the existing toggle logic.
+
 ## 2026-03-09 (update 34)
 
 ### Material 3 full theme refactor — remove app_theme.dart

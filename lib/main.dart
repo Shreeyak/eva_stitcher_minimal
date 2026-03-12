@@ -10,11 +10,11 @@ import 'camera/camera_control.dart';
 import 'camera/camera_settings_queue.dart';
 import 'camera/camera_state.dart';
 import 'widgets/bottom_info_bar.dart';
-import 'widgets/camera_settings_drawer.dart';
+import 'widgets/interactive_bottom_bar.dart';
 import 'widgets/canvas_view.dart';
 import 'widgets/camera_control_overlay.dart';
-import 'widgets/left_toolbar.dart';
 import 'widgets/mini_map.dart';
+import 'widgets/bottom_bar_buttons.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -280,6 +280,8 @@ class _CameraScreenState extends State<CameraScreen> {
         content: Text(msg),
         backgroundColor: Colors.red[900],
         duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
       ),
     );
   }
@@ -291,6 +293,8 @@ class _CameraScreenState extends State<CameraScreen> {
         content: Text(msg),
         backgroundColor: Colors.orange[900],
         duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
       ),
     );
   }
@@ -332,7 +336,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _updateAfFocusSync();
   }
 
-  /// Called by [CameraSettingsDrawer] when the user taps a chip in the strip.
+  /// Called by [CameraSettingsBar] when the user taps a chip
   /// Tapping the same chip a second time collapses the floating overlay.
   void _onSettingChipTap(CameraSettingType? p) {
     setState(() => _activeSetting = p);
@@ -411,6 +415,43 @@ class _CameraScreenState extends State<CameraScreen> {
     _settingsQueue.updateZoom(ratio);
   }
 
+  bool _hasAutoMode(CameraSettingType? param) {
+    if (param == null) return false;
+    switch (param) {
+      case CameraSettingType.focus:
+      case CameraSettingType.wb:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool _isAutoMode(CameraSettingType? param) {
+    if (param == null) return false;
+    switch (param) {
+      case CameraSettingType.focus:
+        return _values.afEnabled;
+      case CameraSettingType.wb:
+        return !_values.wbLocked;
+      default:
+        return false;
+    }
+  }
+
+  void _onAutoToggleTap(CameraSettingType? param) {
+    if (param == null) return;
+    switch (param) {
+      case CameraSettingType.focus:
+        _toggleAf();
+        break;
+      case CameraSettingType.wb:
+        _values.wbLocked ? _unlockWb() : _lockWb();
+        break;
+      default:
+        break;
+    }
+  }
+
   // ── Scan / session ────────────────────────────────────────────────
 
   void _toggleScan() {
@@ -430,7 +471,6 @@ class _CameraScreenState extends State<CameraScreen> {
       _isScanning = false;
       _stitchedCount = 0;
       _sessionSeconds = 0;
-      _showCanvas = false;
     });
     _sessionTimer?.cancel();
   }
@@ -446,127 +486,200 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Scaffold(
-      backgroundColor: cs.surface,
-      body: SafeArea(
-        top: true,
-        bottom: false,
-        left: false,
-        right: false,
-        child: Row(
-          children: [
-            // ── Left toolbar ──
-            LeftToolbar(
-              isScanning: _isScanning,
-              showCanvas: _showCanvas,
-              settingsOpen: _settingsDrawerOpen,
-              canExport: false,
-              onToggleScan: _toggleScan,
-              onToggleCanvas: () => setState(() => _showCanvas = !_showCanvas),
-              onToggleSettings: _toggleSettingsDrawer,
-              onReset: _onReset,
-              onExport: _onExport,
-            ),
+    return PopScope(
+      canPop: !_settingsDrawerOpen,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_settingsDrawerOpen) {
+          _toggleSettingsDrawer();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: cs.surface,
+        body: SafeArea(
+          top: true,
+          bottom: false,
+          left: false,
+          right: false,
+          child: Stack(
+            children: [
+              // Canvas — always the base layer (scrollable infinite plane)
+              const Positioned.fill(child: CanvasView()),
 
-            // ── Main content area ──
-            Expanded(
-              child: Stack(
-                children: [
-                  // Camera preview (always rendered behind everything)
-                  if (_permissionGranted)
-                    Positioned.fill(
-                      child: GestureDetector(
-                        onTap: _cameraStarted ? _lockWb : null,
-                        child: _buildCameraPreview(),
-                      ),
-                    )
-                  else
-                    Center(
-                      child: Text(
-                        'Camera permission required',
-                        style: TextStyle(
-                          color: cs.onSurfaceVariant,
-                          fontSize: 16,
+              // Camera preview window — centered, 60 % of screen width.
+              // Keep in tree with Visibility to maintain camera stream persistence.
+              if (_permissionGranted)
+                Positioned(
+                  top: 44,
+                  bottom: 80,
+                  left: 0,
+                  right: 0,
+                  child: AnimatedOpacity(
+                    opacity: _showCanvas ? 0 : 1,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                    child: Visibility(
+                      visible: !_showCanvas,
+                      maintainState: true,
+                      maintainAnimation: true,
+                      maintainSize: true,
+                      child: Center(
+                        child: FractionallySizedBox(
+                          widthFactor: 0.6,
+                          child: AspectRatio(
+                            aspectRatio: 4 / 3,
+                            child: GestureDetector(
+                              onTap: _cameraStarted ? _lockWb : null,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: cs.primary.withValues(alpha: 0.8),
+                                    width: 2,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: _buildCameraPreview(),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
+                  ),
+                )
+              else if (!_showCanvas)
+                Positioned(
+                  top: 44,
+                  bottom: 80,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Text(
+                      'Camera permission required',
+                      style: TextStyle(
+                        color: cs.onSurfaceVariant,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ),
 
-                  // Canvas overlay (toggled by toolbar)
-                  if (_showCanvas) const Positioned.fill(child: CanvasView()),
+              // Status bar at top
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: BottomInfoBar(
+                  isScanning: _isScanning,
+                  frameCount: _info.frameCount,
+                  stitchedCount: _stitchedCount,
+                  totalTarget: 0,
+                  coveragePct: 0.0,
+                  sessionSeconds: _sessionSeconds,
+                ),
+              ),
 
-                  // MiniMap — top right
-                  Positioned(
-                    top: 8,
-                    right: 8,
+              // MiniMap — top right, hidden in canvas-only mode
+              Positioned(
+                top: 44,
+                right: 8,
+                child: AnimatedOpacity(
+                  opacity: _showCanvas ? 0 : 1,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  child: IgnorePointer(
+                    ignoring: _showCanvas,
                     child: MiniMap(frameCount: _info.frameCount),
                   ),
+                ),
+              ),
 
-                  // All bottom controls pinned to the bottom of the screen
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Floating ruler slider
-                        // Only visible when the drawer is open and a chip is active.
-                        if (_activeSetting != null &&
-                            _settingsDrawerOpen &&
-                            _cameraStarted) ...[
-                          SizedBox(
-                            height:
-                                44, // Matches the ruler's totalHeight precisely
-                            child: CameraControlOverlay(
+              // All bottom controls pinned to the bottom of the screen
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Floating ruler slider + auto toggle
+                    // Only visible when the drawer is open and a chip is active.
+                    if (_activeSetting != null &&
+                        _settingsDrawerOpen &&
+                        _cameraStarted) ...[
+                      SizedBox(
+                        height: 48,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Ruler overlay (centered)
+                            CameraControlOverlay(
                               activeSetting: _activeSetting,
                               values: _values,
                               ranges: _ranges,
                               callbacks: _callbacks,
                             ),
-                          ),
-                          // The relative gap between the overlay and the bar below it
-                          const SizedBox(height: 12),
-                        ],
 
-                        // ColoredBox ensures any sub-pixel gap between the animated
-                        // settings strip and the info bar is covered.
-                        ColoredBox(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.surfaceContainerLowest,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (_cameraStarted)
-                                CameraSettingsDrawer(
-                                  isOpen: _settingsDrawerOpen,
-                                  activeSetting: _activeSetting,
-                                  onSettingChipTap: _onSettingChipTap,
-                                  values: _values,
-                                  callbacks: _callbacks,
+                            // Auto/Manual toggle button (positioned relative to center)
+                            if (_hasAutoMode(_activeSetting))
+                              Positioned(
+                                right:
+                                    (MediaQuery.of(context).size.width / 2) +
+                                    200 +
+                                    32,
+                                child: CameraAutoToggleButton(
+                                  isAuto: _isAutoMode(_activeSetting),
+                                  onTap: () => _onAutoToggleTap(_activeSetting),
                                 ),
-                              BottomInfoBar(
-                                isScanning: _isScanning,
-                                frameCount: _info.frameCount,
-                                stitchedCount: _stitchedCount,
-                                totalTarget: 0,
-                                coveragePct: 0.0,
-                                sessionSeconds: _sessionSeconds,
                               ),
-                            ],
-                          ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
+                      // The relative gap between the overlay and the bar below it
+                      const SizedBox(height: 12),
+                    ],
 
-                  // Resolution debug badge (top-left, subtle)
-                  if (_cameraStarted)
-                    Positioned(top: 8, left: 8, child: _buildResolutionBadge()),
-                ],
+                    // ColoredBox ensures any sub-pixel gap between the animated
+                    // settings strip and the info bar is covered.
+                    ColoredBox(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerLowest,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_cameraStarted)
+                            InteractiveBottomBar(
+                              isScanning: _isScanning,
+                              showCanvas: _showCanvas,
+                              isSettingsOpen: _settingsDrawerOpen,
+                              onToggleScan: _toggleScan,
+                              onToggleCanvas: () =>
+                                  setState(() => _showCanvas = !_showCanvas),
+                              onToggleSettings: _toggleSettingsDrawer,
+                              onReset: _onReset,
+                              onExport: _onExport,
+                              activeSetting: _activeSetting,
+                              onSettingChipTap: _onSettingChipTap,
+                              values: _values,
+                              callbacks: _callbacks,
+                              canExport: false,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+
+              // Resolution debug badge (top-left, subtle)
+              if (_cameraStarted)
+                Positioned(top: 44, left: 8, child: _buildResolutionBadge()),
+            ],
+          ),
         ),
       ),
     );
