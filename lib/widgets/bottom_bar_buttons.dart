@@ -29,7 +29,7 @@ class BottomBarActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final color = isDisabled
+    final targetColor = isDisabled
         ? cs.onSurface.withValues(alpha: 0.38)
         : isActive
         ? cs.primary
@@ -41,22 +41,29 @@ class BottomBarActionButton extends StatelessWidget {
       child: Padding(
         // Internal padding that expands the clickable area and ink splash size
         padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 28),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
-                color: color,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+        child: TweenAnimationBuilder<Color?>(
+          tween: ColorTween(end: targetColor),
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOutCubicEmphasized,
+          builder: (context, color, child) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: color, size: 28),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                    color: color,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -174,34 +181,31 @@ class CameraAutoToggleButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        // Inner padding defining the tappable area and bounds of the auto/manual toggle button
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOutCubicEmphasized,
+        width: 40,
+        height: 40,
         decoration: BoxDecoration(
+          shape: BoxShape.circle,
           color: isAuto ? cs.primaryContainer : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isAuto ? Colors.transparent : cs.outlineVariant,
+            width: 2,
           ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isAuto ? Icons.auto_mode : Icons.pan_tool,
-              size: 20,
-              color: isAuto ? cs.primary : cs.onSurfaceVariant,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              isAuto ? 'Auto' : 'Manual',
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                color: isAuto ? cs.primary : cs.onSurfaceVariant,
+        child: TweenAnimationBuilder<Color?>(
+          tween: ColorTween(end: isAuto ? cs.primary : cs.onSurfaceVariant),
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOutCubicEmphasized,
+          builder: (context, color, _) {
+            return Center(
+              child: Icon(
+                isAuto ? Icons.auto_mode : Icons.pan_tool,
+                size: 24,
+                color: color,
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

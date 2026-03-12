@@ -14,6 +14,7 @@ import 'widgets/interactive_bottom_bar.dart';
 import 'widgets/canvas_view.dart';
 import 'widgets/camera_control_overlay.dart';
 import 'widgets/mini_map.dart';
+import 'widgets/bottom_bar_buttons.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -414,6 +415,43 @@ class _CameraScreenState extends State<CameraScreen> {
     _settingsQueue.updateZoom(ratio);
   }
 
+  bool _hasAutoMode(CameraSettingType? param) {
+    if (param == null) return false;
+    switch (param) {
+      case CameraSettingType.focus:
+      case CameraSettingType.wb:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool _isAutoMode(CameraSettingType? param) {
+    if (param == null) return false;
+    switch (param) {
+      case CameraSettingType.focus:
+        return _values.afEnabled;
+      case CameraSettingType.wb:
+        return !_values.wbLocked;
+      default:
+        return false;
+    }
+  }
+
+  void _onAutoToggleTap(CameraSettingType? param) {
+    if (param == null) return;
+    switch (param) {
+      case CameraSettingType.focus:
+        _toggleAf();
+        break;
+      case CameraSettingType.wb:
+        _values.wbLocked ? _unlockWb() : _lockWb();
+        break;
+      default:
+        break;
+    }
+  }
+
   // ── Scan / session ────────────────────────────────────────────────
 
   void _toggleScan() {
@@ -567,18 +605,37 @@ class _CameraScreenState extends State<CameraScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Floating ruler slider
+                    // Floating ruler slider + auto toggle
                     // Only visible when the drawer is open and a chip is active.
                     if (_activeSetting != null &&
                         _settingsDrawerOpen &&
                         _cameraStarted) ...[
                       SizedBox(
-                        height: 44, // Matches the ruler's totalHeight precisely
-                        child: CameraControlOverlay(
-                          activeSetting: _activeSetting,
-                          values: _values,
-                          ranges: _ranges,
-                          callbacks: _callbacks,
+                        height: 48,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Ruler overlay (centered)
+                            CameraControlOverlay(
+                              activeSetting: _activeSetting,
+                              values: _values,
+                              ranges: _ranges,
+                              callbacks: _callbacks,
+                            ),
+
+                            // Auto/Manual toggle button (positioned relative to center)
+                            if (_hasAutoMode(_activeSetting))
+                              Positioned(
+                                right:
+                                    (MediaQuery.of(context).size.width / 2) +
+                                    200 +
+                                    32,
+                                child: CameraAutoToggleButton(
+                                  isAuto: _isAutoMode(_activeSetting),
+                                  onTap: () => _onAutoToggleTap(_activeSetting),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                       // The relative gap between the overlay and the bar below it

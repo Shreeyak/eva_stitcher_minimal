@@ -45,11 +45,8 @@ class InteractiveBottomBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TweenAnimationBuilder<double>(
-      tween: Tween<double>(
-        begin: isSettingsOpen ? 1.0 : 0.0,
-        end: isSettingsOpen ? 1.0 : 0.0,
-      ),
-      duration: const Duration(milliseconds: 500),
+      tween: Tween<double>(end: isSettingsOpen ? 1.0 : 0.0),
+      duration: const Duration(milliseconds: 400),
       curve: Curves.easeInOutCubicEmphasized,
       builder: (context, t, child) {
         return Stack(

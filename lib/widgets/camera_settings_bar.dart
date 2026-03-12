@@ -110,13 +110,6 @@ class CameraSettingsBar extends StatelessWidget {
                           : CameraSettingType.zoom,
                     ),
                   ),
-                  // spacer for auto/manual toggle button
-                  const SizedBox(width: 16),
-                  if (_hasAutoMode(activeSetting))
-                    CameraAutoToggleButton(
-                      isAuto: _isAuto(activeSetting),
-                      onTap: () => _onAutoTap(activeSetting),
-                    ),
                 ],
               ),
             ),
@@ -130,42 +123,5 @@ class CameraSettingsBar extends StatelessWidget {
     final secs = ns / 1e9;
     if (secs < 1.0) return '1/${(1.0 / secs).round()}';
     return '${secs.toStringAsFixed(1)}s';
-  }
-
-  bool _isAuto(CameraSettingType? param) {
-    if (param == null) return false;
-    switch (param) {
-      case CameraSettingType.focus:
-        return values.afEnabled;
-      case CameraSettingType.wb:
-        return !values.wbLocked;
-      default:
-        return false;
-    }
-  }
-
-  void _onAutoTap(CameraSettingType? param) {
-    if (param == null) return;
-    switch (param) {
-      case CameraSettingType.focus:
-        callbacks.onToggleAf();
-        break;
-      case CameraSettingType.wb:
-        values.wbLocked ? callbacks.onUnlockWb() : callbacks.onLockWb();
-        break;
-      default:
-        break;
-    }
-  }
-
-  bool _hasAutoMode(CameraSettingType? param) {
-    if (param == null) return false;
-    switch (param) {
-      case CameraSettingType.focus:
-      case CameraSettingType.wb:
-        return true;
-      default:
-        return false;
-    }
   }
 }
