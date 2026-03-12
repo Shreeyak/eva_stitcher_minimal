@@ -469,31 +469,42 @@ class _CameraScreenState extends State<CameraScreen> {
               const Positioned.fill(child: CanvasView()),
 
               // Camera preview window — centered, 60 % of screen width.
-              // Hidden in canvas-only mode.
-              if (!_showCanvas && _permissionGranted)
+              // Keep in tree with Visibility to maintain camera stream persistence.
+              if (_permissionGranted)
                 Positioned(
                   top: 44,
                   bottom: 80,
                   left: 0,
                   right: 0,
-                  child: Center(
-                    child: FractionallySizedBox(
-                      widthFactor: 0.6,
-                      child: AspectRatio(
-                        aspectRatio: 4 / 3,
-                        child: GestureDetector(
-                          onTap: _cameraStarted ? _lockWb : null,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: cs.primary.withValues(alpha: 0.8),
-                                width: 2,
+                  child: AnimatedOpacity(
+                    opacity: _showCanvas ? 0 : 1,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                    child: Visibility(
+                      visible: !_showCanvas,
+                      maintainState: true,
+                      maintainAnimation: true,
+                      maintainSize: true,
+                      child: Center(
+                        child: FractionallySizedBox(
+                          widthFactor: 0.6,
+                          child: AspectRatio(
+                            aspectRatio: 4 / 3,
+                            child: GestureDetector(
+                              onTap: _cameraStarted ? _lockWb : null,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: cs.primary.withValues(alpha: 0.8),
+                                    width: 2,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: _buildCameraPreview(),
+                                ),
                               ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: _buildCameraPreview(),
                             ),
                           ),
                         ),
@@ -534,12 +545,19 @@ class _CameraScreenState extends State<CameraScreen> {
               ),
 
               // MiniMap — top right, hidden in canvas-only mode
-              if (!_showCanvas)
-                Positioned(
-                  top: 44,
-                  right: 8,
-                  child: MiniMap(frameCount: _info.frameCount),
+              Positioned(
+                top: 44,
+                right: 8,
+                child: AnimatedOpacity(
+                  opacity: _showCanvas ? 0 : 1,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  child: IgnorePointer(
+                    ignoring: _showCanvas,
+                    child: MiniMap(frameCount: _info.frameCount),
+                  ),
                 ),
+              ),
 
               // All bottom controls pinned to the bottom of the screen
               Positioned(
