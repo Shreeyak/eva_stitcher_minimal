@@ -9,7 +9,6 @@ import 'camera_settings_bar.dart';
 class InteractiveBottomBar extends StatelessWidget {
   final bool isScanning;
   final bool showCanvas;
-  final bool showCameraFull;
   final bool isSettingsOpen;
   final bool canExport;
 
@@ -21,7 +20,6 @@ class InteractiveBottomBar extends StatelessWidget {
   // Callbacks
   final VoidCallback onToggleScan;
   final VoidCallback onToggleCanvas;
-  final VoidCallback onToggleCameraFull;
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
   final VoidCallback onExport;
@@ -31,7 +29,6 @@ class InteractiveBottomBar extends StatelessWidget {
     super.key,
     required this.isScanning,
     required this.showCanvas,
-    required this.showCameraFull,
     required this.isSettingsOpen,
     required this.canExport,
     required this.activeSetting,
@@ -39,7 +36,6 @@ class InteractiveBottomBar extends StatelessWidget {
     required this.callbacks,
     required this.onToggleScan,
     required this.onToggleCanvas,
-    required this.onToggleCameraFull,
     required this.onToggleSettings,
     required this.onReset,
     required this.onExport,
@@ -69,11 +65,9 @@ class InteractiveBottomBar extends StatelessWidget {
                   child: _MainActionBar(
                     isScanning: isScanning,
                     showCanvas: showCanvas,
-                    showCameraFull: showCameraFull,
                     canExport: canExport,
                     onToggleScan: onToggleScan,
                     onToggleCanvas: onToggleCanvas,
-                    onToggleCameraFull: onToggleCameraFull,
                     onToggleSettings: onToggleSettings,
                     onReset: onReset,
                     onExport: onExport,
@@ -109,11 +103,9 @@ class InteractiveBottomBar extends StatelessWidget {
 class _MainActionBar extends StatelessWidget {
   final bool isScanning;
   final bool showCanvas;
-  final bool showCameraFull;
   final bool canExport;
   final VoidCallback onToggleScan;
   final VoidCallback onToggleCanvas;
-  final VoidCallback onToggleCameraFull;
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
   final VoidCallback onExport;
@@ -121,11 +113,9 @@ class _MainActionBar extends StatelessWidget {
   const _MainActionBar({
     required this.isScanning,
     required this.showCanvas,
-    required this.showCameraFull,
     required this.canExport,
     required this.onToggleScan,
     required this.onToggleCanvas,
-    required this.onToggleCameraFull,
     required this.onToggleSettings,
     required this.onReset,
     required this.onExport,
@@ -158,15 +148,6 @@ class _MainActionBar extends StatelessWidget {
             label: 'CANVAS',
             isActive: showCanvas,
             onTap: onToggleCanvas,
-          ),
-          const SizedBox(width: 32),
-          BottomBarActionButton(
-            icon: showCameraFull
-                ? Icons.camera_alt
-                : Icons.camera_alt_outlined,
-            label: 'CAMERA',
-            isActive: showCameraFull,
-            onTap: onToggleCameraFull,
           ),
           const SizedBox(width: 32),
           BottomBarActionButton(icon: Icons.refresh, label: 'RESET', onTap: onReset),
