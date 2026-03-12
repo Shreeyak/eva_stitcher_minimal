@@ -255,9 +255,11 @@ class CameraManager(
                                             .get(CaptureResult.COLOR_CORRECTION_GAINS)
                                             ?.let { capturedColorGains = it }
                                     }
-                                    // Capture live focus distance
-                                    result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let {
-                                        capturedFocusDistance = it
+                                    // Capture live focus distance (only when AF is ON)
+                                    if (afEnabled) {
+                                        result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let {
+                                            capturedFocusDistance = it
+                                        }
                                     }
 
                                     // Capture default AE target FPS range once.

@@ -50,8 +50,10 @@ class _CanvasViewState extends State<CanvasView> {
             height: CanvasView.kCanvasHeight,
             child: Stack(
               children: [
-                // 1. Plain background
-                Positioned.fill(child: ColoredBox(color: cs.surface)),
+                // 1. Plain background (lighter shade of surface)
+                Positioned.fill(
+                  child: ColoredBox(color: cs.surfaceContainerLow),
+                ),
 
                 // 2. Stitched image, centered in the canvas
                 Center(
@@ -66,7 +68,7 @@ class _CanvasViewState extends State<CanvasView> {
                 Positioned.fill(
                   child: CustomPaint(
                     painter: _GridPainter(
-                      minorColor: cs.surfaceContainer,
+                      minorColor: cs.surfaceContainerHigh,
                       majorColor: cs.surfaceContainerHighest,
                     ),
                   ),

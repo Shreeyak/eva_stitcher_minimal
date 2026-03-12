@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '../camera/camera_state.dart';
 
@@ -178,35 +179,27 @@ class CameraAutoToggleButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOutCubicEmphasized,
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: isAuto ? cs.primaryContainer : Colors.transparent,
-          border: Border.all(
-            color: isAuto ? Colors.transparent : cs.outlineVariant,
-            width: 2,
-          ),
-        ),
-        child: TweenAnimationBuilder<Color?>(
-          tween: ColorTween(end: isAuto ? cs.primary : cs.onSurfaceVariant),
-          duration: const Duration(milliseconds: 400),
-          curve: Curves.easeInOutCubicEmphasized,
-          builder: (context, color, _) {
-            return Center(
-              child: Icon(
-                isAuto ? Icons.auto_mode : Icons.pan_tool,
-                size: 24,
-                color: color,
-              ),
-            );
-          },
-        ),
+
+    return IconButton(
+      onPressed: onTap,
+      isSelected: isAuto,
+      icon: const Icon(Symbols.autofps_select_rounded),
+      selectedIcon: const Icon(Symbols.autofps_select_rounded),
+      style: ButtonStyle(
+        fixedSize: WidgetStateProperty.all(const Size(44, 44)),
+        backgroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return cs.primary.withValues(alpha: 0.15);
+          }
+          return cs.surfaceContainerHigh.withValues(alpha: 0.5);
+        }),
+        foregroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return cs.primary;
+          }
+          return cs.onSurfaceVariant;
+        }),
+        iconSize: WidgetStateProperty.all(28.0),
       ),
     );
   }
