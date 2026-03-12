@@ -23,6 +23,11 @@ class CameraControl {
     return path ?? '';
   }
 
+  static Future<Map<String, dynamic>> dumpActiveCameraSettings() async {
+    final result = await _method.invokeMethod<Map>('dumpActiveCameraSettings');
+    return Map<String, dynamic>.from(result ?? {});
+  }
+
   // ── White balance ──────────────────────────────────────────────────
 
   static Future<bool> lockWhiteBalance() async {

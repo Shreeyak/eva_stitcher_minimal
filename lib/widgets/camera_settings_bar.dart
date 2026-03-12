@@ -8,6 +8,7 @@ class CameraSettingsBar extends StatelessWidget {
   final CameraValues values;
   final CameraCallbacks callbacks;
   final VoidCallback onToggleSettings;
+  final VoidCallback onDumpSettings;
   final ValueChanged<CameraSettingType?> onSettingChipTap;
 
   const CameraSettingsBar({
@@ -16,6 +17,7 @@ class CameraSettingsBar extends StatelessWidget {
     required this.values,
     required this.callbacks,
     required this.onToggleSettings,
+    required this.onDumpSettings,
     required this.onSettingChipTap,
   });
 
@@ -113,6 +115,14 @@ class CameraSettingsBar extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+
+          const SizedBox(width: 24),
+
+          BottomBarActionButton(
+            icon: Icons.file_download_outlined,
+            label: 'DUMP SETTINGS',
+            onTap: onDumpSettings,
           ),
         ],
       ),

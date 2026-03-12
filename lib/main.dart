@@ -481,6 +481,36 @@ class _CameraScreenState extends State<CameraScreen> {
     ).showSnackBar(const SnackBar(content: Text('Export not yet implemented')));
   }
 
+  Future<void> _onDumpSettings() async {
+    try {
+      final result = await CameraControl.dumpActiveCameraSettings();
+      final filePath = result['filePath'] as String? ?? '';
+      final keyCount = (result['keyCount'] as num?)?.toInt() ?? 0;
+      final supportedKeyCount =
+          (result['supportedKeyCount'] as num?)?.toInt() ?? 0;
+
+      debugPrint('=== Camera settings dumped ===');
+      debugPrint('Key count: $keyCount (supported: $supportedKeyCount)');
+      debugPrint('Saved file: $filePath');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Dump settings saved ($supportedKeyCount/$keyCount keys)\n$filePath',
+          ),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Dump settings failed: $e');
+      if (!mounted) return;
+      _showError('Dump settings failed: $e');
+    }
+  }
+
   // ── Build ─────────────────────────────────────────────────────────
 
   @override
@@ -660,6 +690,7 @@ class _CameraScreenState extends State<CameraScreen> {
                               onToggleCanvas: () =>
                                   setState(() => _showCanvas = !_showCanvas),
                               onToggleSettings: _toggleSettingsDrawer,
+                              onDumpSettings: _onDumpSettings,
                               onReset: _onReset,
                               onExport: _onExport,
                               activeSetting: _activeSetting,
