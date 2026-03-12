@@ -279,6 +279,8 @@ class _CameraScreenState extends State<CameraScreen> {
         content: Text(msg),
         backgroundColor: Colors.red[900],
         duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
       ),
     );
   }
@@ -290,6 +292,8 @@ class _CameraScreenState extends State<CameraScreen> {
         content: Text(msg),
         backgroundColor: Colors.orange[900],
         duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
       ),
     );
   }
@@ -331,7 +335,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _updateAfFocusSync();
   }
 
-  /// Called by [CameraSettingsDrawer] when the user taps a chip in the strip.
+  /// Called by [CameraSettingsBar] when the user taps a chip
   /// Tapping the same chip a second time collapses the floating overlay.
   void _onSettingChipTap(CameraSettingType? p) {
     setState(() => _activeSetting = p);

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-13 (update 41)
+
+### Bottom bar simplification
+
+- Removed the `CAMERA` action button from `InteractiveBottomBar` and deleted its related widget props/callback wiring from `main.dart`.
+- Removed `_showCameraFull` and all full-camera-mode behavior (toggle paths, size/position branching, and minimap visibility branching) from `main.dart`.
+
 ## 2026-03-12 (update 40)
 
 ### Instruction stack restructure per GitHub official guidelines
@@ -12,10 +19,10 @@
 
 ### Canvas-first layout with floating camera preview window
 
-- Canvas (`CanvasView`) is now the permanent base layer instead of an optional overlay; toggling is removed.
-- `CanvasView` refactored to use `InteractiveViewer` for pan/zoom, rendering a 6000×6000 logical canvas with background → grid → stitched-image stack. Mockup image (`scripts/tmp_files/01-L0-CMU-2.png`) registered as a Flutter asset.
+- Canvas (`CanvasView`) is now the permanent base layer instead of an optional overlay.
+- `CanvasView` refactored to use `InteractiveViewer` for pan/zoom, rendering a 6000×6000 logical canvas with background → grid → stitched-image stack. Mockup image (`scripts/tmp_files/r04_c04.png`) registered as a Flutter asset.
 - Camera preview moved from full-screen fill to a centered, framed window: 60 % of screen width, 4:3 aspect ratio, with rounded border using `cs.primary`.
-- Removed `_showCanvas` state, `onToggleCanvas` callback, and the CANVAS button from the main action bar.
+- `_showCanvas` state, `onToggleCanvas` callback, and the CANVAS button remain in `main.dart`/`InteractiveBottomBar`; the new canvas-first layout is layered on top of the existing toggle logic.
 
 ## 2026-03-09 (update 34)
 
