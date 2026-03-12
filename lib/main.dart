@@ -275,13 +275,36 @@ class _CameraScreenState extends State<CameraScreen> {
 
   void _showError(String msg) {
     if (!mounted) return;
+    final cs = Theme.of(context).colorScheme;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg),
-        backgroundColor: Colors.red[900],
-        duration: const Duration(seconds: 4),
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
+        backgroundColor: cs.errorContainer.withAlpha(217), // 0.85 alpha
+        elevation: 4,
+        width: MediaQuery.of(context).size.width * 0.85,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: cs.error.withAlpha(50)),
+        ),
+        content: Row(
+          children: [
+            Icon(Icons.error_outline, color: cs.error, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                msg,
+                style: TextStyle(
+                  color: cs.onErrorContainer,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 5),
       ),
     );
   }
@@ -494,14 +517,57 @@ class _CameraScreenState extends State<CameraScreen> {
       debugPrint('Saved file: $filePath');
 
       if (!mounted) return;
+      final cs = Theme.of(context).colorScheme;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Dump settings saved ($supportedKeyCount/$keyCount keys)\n$filePath',
-          ),
           behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.only(left: 16, right: 16, bottom: 92),
+          backgroundColor: cs.surfaceContainerHigh.withAlpha(
+            217,
+          ), // 0.85 * 255 ≈ 217
+          elevation: 4,
+          margin: const EdgeInsets.only(left: 128, right: 128, bottom: 60),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: cs.outlineVariant.withAlpha(80)),
+          ),
+          content: Row(
+            children: [
+              Icon(Icons.save_as_outlined, color: cs.primary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Settings Dumped Successfully',
+                      style: TextStyle(
+                        color: cs.onSurface,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Captured $supportedKeyCount keys to ${filePath.split("/").last}',
+                      style: TextStyle(
+                        color: cs.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'DISMISS',
+            textColor: cs.primary,
+            onPressed: () {},
+          ),
         ),
       );
     } catch (e) {
