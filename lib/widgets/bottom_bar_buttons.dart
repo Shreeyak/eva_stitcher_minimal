@@ -31,40 +31,35 @@ class BottomBarActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final targetColor = isDisabled
-        ? cs.onSurface.withValues(alpha: 0.38)
+        ? cs.onSurface.withValues(alpha: 0.3)
         : isActive
         ? cs.primary
-        : cs.onSurfaceVariant;
+        : cs.onPrimaryContainer.withValues(alpha: 0.7);
 
     return InkWell(
       onTap: isDisabled ? null : onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        // Internal padding that expands the clickable area and ink splash size
-        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
-        child: TweenAnimationBuilder<Color?>(
-          tween: ColorTween(end: targetColor),
-          duration: const Duration(milliseconds: 400),
-          curve: Curves.easeInOutCubicEmphasized,
-          builder: (context, color, child) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: color, size: 28),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
-                    color: color,
-                    letterSpacing: 0.5,
-                  ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: Padding(
+          // Internal padding that expands the clickable area and ink splash size
+          padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: targetColor, size: 28),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                  color: targetColor,
+                  letterSpacing: 0.5,
                 ),
-              ],
-            );
-          },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -107,7 +102,9 @@ class CameraSettingChip extends StatelessWidget {
       // - Bottom (4.0): Shifts the chip slightly upwards relative to its neighbors or container center.
       padding: const EdgeInsets.fromLTRB(10.0, 0.0, 10.0, 4.0),
       child: Material(
-        color: isActive ? cs.primary : cs.surfaceContainerHigh,
+        color: isActive
+            ? cs.primary.withValues(alpha: 0.8)
+            : cs.surfaceContainerLow,
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           onTap: onTap,
