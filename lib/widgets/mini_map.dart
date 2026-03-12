@@ -36,7 +36,7 @@ class MiniMap extends StatelessWidget {
             // Downsampled stitched image background
             Positioned.fill(
               child: Image.asset(
-                'scripts/tmp_files/r04_c04.png',
+                'assets/r04_c04.png',
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => ColoredBox(
                   color: cs.surfaceContainer,

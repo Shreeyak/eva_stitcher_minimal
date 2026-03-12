@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Infinite scrollable canvas showing the stitched image on top of a grid
-/// background.  Layers (bottom to top): plain surface → grid → stitched image.
+/// background.  Layers (bottom to top): plain surface → stitched image → grid.
 ///
 /// Starts centered on the image.  [InteractiveViewer] provides pan and zoom.
 class CanvasView extends StatefulWidget {
@@ -58,7 +58,7 @@ class _CanvasViewState extends State<CanvasView> {
                 // 2. Stitched image, centered in the canvas
                 Center(
                   child: Image.asset(
-                    'scripts/tmp_files/r04_c04.png',
+                    'assets/r04_c04.png',
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                   ),

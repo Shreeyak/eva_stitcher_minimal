@@ -5,7 +5,7 @@ import 'bottom_bar_buttons.dart';
 import 'camera_settings_bar.dart';
 
 /// The bottom interactive area that hosts both the Main Action Bar
-/// and the Camera Settings Bar, animating between them with a clipped slide.
+/// and the Camera Settings Bar, animating between them.
 class InteractiveBottomBar extends StatelessWidget {
   final bool isScanning;
   final bool showCanvas;

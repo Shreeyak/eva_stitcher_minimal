@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-13 (update 42)
+
+### Asset Migration
+
+- Updated `MiniMap` and `CanvasView` to use the `assets/r04_c04.png` (registered in `pubspec.yaml`) instead of the temporary path in `scripts/tmp_files/`.
+
 ## 2026-03-13 (update 41)
 
 ### Bottom bar simplification
