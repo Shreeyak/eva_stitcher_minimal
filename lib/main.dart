@@ -6,9 +6,8 @@ import 'package:flutter/services.dart';
 
 import 'theme/material_theme_salmon.dart';
 import 'theme/theme_util.dart';
-import 'camera/camera_control.dart';
-import 'camera/camera_settings_queue.dart';
-import 'camera/camera_state.dart';
+import 'package:eva_camera/eva_camera.dart';
+import 'camera/camera_callbacks.dart';
 import 'widgets/bottom_info_bar.dart';
 import 'widgets/interactive_bottom_bar.dart';
 import 'widgets/canvas_view.dart';
@@ -65,7 +64,7 @@ class _CameraScreenState extends State<CameraScreen> {
   late final CameraCallbacks _callbacks;
 
   // ── EventChannel ──────────────────────────────────────────────────
-  StreamSubscription<Map<dynamic, dynamic>>? _eventSub;
+  StreamSubscription<CameraInfo>? _eventSub;
 
   // ── Camera command sequencing ─────────────────────────────────────
   late final CameraSettingsQueue _settingsQueue;
@@ -100,8 +99,7 @@ class _CameraScreenState extends State<CameraScreen> {
       onExposureTimeNsChanged: _onExposureTimeNsChanged,
       onFocusChanged: _onFocusChanged,
       onZoomChanged: _onZoomChanged,
-      onLockWb: _lockWb,
-      onUnlockWb: _unlockWb,
+      onWbLockChanged: _setWbLocked,
       onToggleAf: _toggleAf,
     );
     _initCamera();
@@ -118,33 +116,27 @@ class _CameraScreenState extends State<CameraScreen> {
       sendIso: CameraControl.setIso,
       sendShutter: CameraControl.setExposureTimeNs,
       sendZoom: CameraControl.setZoomRatio,
-      sendWbLock: (locked) async {
-        if (locked) {
-          await CameraControl.lockWhiteBalance();
-        } else {
-          await CameraControl.unlockWhiteBalance();
-        }
-      },
+      sendWbLock: CameraControl.setWbLocked,
       initialAfEnabled: _values.afEnabled,
       onError: (key, error) {
         if (!mounted) return;
         switch (key) {
-          case CameraSettingKey.af:
+          case CameraSettingType.af:
             _showError('AF update failed: $error');
             break;
-          case CameraSettingKey.focus:
+          case CameraSettingType.focus:
             _showError('Focus update failed: $error');
             break;
-          case CameraSettingKey.iso:
+          case CameraSettingType.iso:
             _showWarning('ISO update failed: $error');
             break;
-          case CameraSettingKey.shutter:
+          case CameraSettingType.shutter:
             _showWarning('Shutter update failed: $error');
             break;
-          case CameraSettingKey.zoom:
+          case CameraSettingType.zoom:
             _showWarning('Zoom update failed: $error');
             break;
-          case CameraSettingKey.wb:
+          case CameraSettingType.wb:
             _showWarning('WB update failed: $error');
             // Revert to the last confirmed native WB state.
             // Using _committedWbLocked (captured before the optimistic flip)
@@ -174,10 +166,10 @@ class _CameraScreenState extends State<CameraScreen> {
       final info = await CameraControl.startCamera();
       if (!mounted) return;
 
-      final cw = info['captureWidth'] ?? '--';
-      final ch = info['captureHeight'] ?? '--';
-      final aw = info['analysisWidth'] ?? '--';
-      final ah = info['analysisHeight'] ?? '--';
+      final cw = info.captureWidth?.toString() ?? '--';
+      final ch = info.captureHeight?.toString() ?? '--';
+      final aw = info.analysisWidth?.toString() ?? '--';
+      final ah = info.analysisHeight?.toString() ?? '--';
 
       setState(() {
         _cameraStarted = true;
@@ -187,23 +179,12 @@ class _CameraScreenState extends State<CameraScreen> {
         );
       });
 
-      // Fetch device capability ranges — all read-only, safe to parallelize.
-      final results = await Future.wait([
-        CameraControl.getMinFocusDistance(),
-        CameraControl.getMinZoomRatio(),
-        CameraControl.getMaxZoomRatio(),
-        CameraControl.getExposureTimeRangeNs(),
-        CameraControl.getIsoRange(),
-      ]);
-
-      if (!mounted) return;
-
       final ranges = CameraRanges(
-        minFocusDistance: results[0] as double,
-        minZoomRatio: results[1] as double,
-        maxZoomRatio: results[2] as double,
-        exposureTimeRangeNs: results[3] as List<int>,
-        isoRange: results[4] as List<int>,
+        minFocusDistance: info.minFocusDistance,
+        minZoomRatio: info.minZoomRatio,
+        maxZoomRatio: info.maxZoomRatio,
+        exposureTimeRangeNs: info.exposureTimeRangeNs,
+        isoRange: info.isoRange,
       );
       final initial = CameraValues.initialFromRanges(ranges);
 
@@ -236,28 +217,11 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   void _listenToEvents() {
-    _eventSub = CameraControl.eventStream.listen((event) {
+    _eventSub = CameraControl.eventStream.listen((info) {
       if (!mounted) return;
-      final type = event['type'] as String? ?? 'status';
-      final tag = event['tag'] as String? ?? '';
-      final message = event['message'] as String? ?? '';
-      final data = event['data'] as Map? ?? {};
-
-      if (tag == 'fps') {
-        setState(() {
-          _info = _info.copyWith(
-            frameCount:
-                (data['frameCount'] as num?)?.toInt() ?? _info.frameCount,
-            fps: (data['fps'] as num?)?.toDouble() ?? _info.fps,
-          );
-        });
-      } else if (tag == 'cameraSettings') {
-        debugPrint('cameraSettings: $message');
-      } else if (type == 'warning') {
-        _showWarning(message);
-      } else if (type == 'error') {
-        _showError(message);
-      }
+      setState(() {
+        _info = _info.copyWith(frameCount: info.frameCount, fps: info.fps);
+      });
     }, onError: (e) => debugPrint('Event stream error: $e'));
   }
 
@@ -326,20 +290,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
   // ── Camera actions ────────────────────────────────────────────────
 
-  Future<void> _lockWb() async {
+  Future<void> _setWbLocked(bool locked) async {
     if (!mounted) return;
     // Save pre-optimistic state so the error handler can revert correctly.
     _committedWbLocked = _values.wbLocked;
-    setState(() => _values = _values.copyWith(wbLocked: true));
-    _settingsQueue.updateWbLock(true);
-  }
-
-  Future<void> _unlockWb() async {
-    if (!mounted) return;
-    // Save pre-optimistic state so the error handler can revert correctly.
-    _committedWbLocked = _values.wbLocked;
-    setState(() => _values = _values.copyWith(wbLocked: false));
-    _settingsQueue.updateWbLock(false);
+    setState(() => _values = _values.copyWith(wbLocked: locked));
+    _settingsQueue.updateWbLocked(locked);
   }
 
   Future<void> _toggleAf() async {
@@ -470,8 +426,9 @@ class _CameraScreenState extends State<CameraScreen> {
         _toggleAf();
         break;
       case CameraSettingType.wb:
-        _values.wbLocked ? _unlockWb() : _lockWb();
+        _setWbLocked(!_values.wbLocked);
         break;
+      case CameraSettingType.af:
       default:
         break;
     }
@@ -554,7 +511,9 @@ class _CameraScreenState extends State<CameraScreen> {
                           child: AspectRatio(
                             aspectRatio: 4 / 3,
                             child: GestureDetector(
-                              onTap: _cameraStarted ? _lockWb : null,
+                              onTap: _cameraStarted
+                                  ? () => _setWbLocked(true)
+                                  : null,
                               child: Container(
                                 decoration: BoxDecoration(
                                   border: Border.all(
@@ -714,7 +673,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Widget _buildCameraPreview() {
     return PlatformViewLink(
-      viewType: 'camerax-preview',
+      viewType: CameraControl.previewViewType,
       surfaceFactory: (context, controller) {
         return AndroidViewSurface(
           controller: controller as AndroidViewController,
@@ -725,7 +684,7 @@ class _CameraScreenState extends State<CameraScreen> {
       onCreatePlatformView: (params) {
         return PlatformViewsService.initExpensiveAndroidView(
             id: params.id,
-            viewType: 'camerax-preview',
+            viewType: CameraControl.previewViewType,
             layoutDirection: TextDirection.ltr,
             creationParamsCodec: const StandardMessageCodec(),
           )

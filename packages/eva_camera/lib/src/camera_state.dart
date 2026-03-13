@@ -1,22 +1,135 @@
-// lib/camera/camera_state.dart
-//
 // Immutable data classes that group camera-related models into coherent objects:
 //
 //   CameraValues  — user-controllable current values (changes on every slider drag)
 //   CameraRanges  — device capabilities (set once at startup, immutable after)
 //   CameraInfo    — read-only telemetry from the EventChannel
-//   CameraCallbacks — bundled action callbacks for widgets
 //   CameraSettingType — shared identifier for adjustable camera controls
-
-import 'package:flutter/foundation.dart' show VoidCallback;
 
 // ─── CameraSettingType enum ────────────────────────────────────────────────────────
 
-/// Shared identifier for the adjustable camera controls used by the UI.
+/// Shared identifier for adjustable camera controls used across UI and queueing.
 ///
 /// Keep this enum lightweight: presentation metadata such as labels, icons,
 /// and auto/manual affordances belongs in the widgets that render the control.
-enum CameraSettingType { iso, shutter, focus, wb, zoom }
+///
+/// [af] is included for queue/error-reporting parity even though the current UI
+/// does not render it as a standalone settings chip.
+enum CameraSettingType { af, iso, shutter, focus, wb, zoom }
+
+/// Camera2 CONTROL_CAPTURE_INTENT values exposed to Dart.
+enum CaptureIntent { preview, stillCapture }
+
+/// ImageCapture output format — switching triggers a camera rebind.
+enum CaptureFormat { yuv, jpeg }
+
+// ─── Structured platform payloads ─────────────────────────────────────────────
+
+/// Resolution payload returned by camera startup/rebind queries.
+class CameraResolutionInfo {
+  const CameraResolutionInfo({
+    this.captureWidth,
+    this.captureHeight,
+    this.analysisWidth,
+    this.analysisHeight,
+  });
+
+  final int? captureWidth;
+  final int? captureHeight;
+  final int? analysisWidth;
+  final int? analysisHeight;
+
+  factory CameraResolutionInfo.fromMap(Map<dynamic, dynamic> map) {
+    int? asInt(Object? v) => (v as num?)?.toInt();
+    return CameraResolutionInfo(
+      captureWidth: asInt(map['captureWidth']),
+      captureHeight: asInt(map['captureHeight']),
+      analysisWidth: asInt(map['analysisWidth']),
+      analysisHeight: asInt(map['analysisHeight']),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    if (captureWidth != null) 'captureWidth': captureWidth,
+    if (captureHeight != null) 'captureHeight': captureHeight,
+    if (analysisWidth != null) 'analysisWidth': analysisWidth,
+    if (analysisHeight != null) 'analysisHeight': analysisHeight,
+  };
+}
+
+/// Startup payload returned by [CameraControl.startCamera].
+class CameraStartInfo extends CameraResolutionInfo {
+  const CameraStartInfo({
+    super.captureWidth,
+    super.captureHeight,
+    super.analysisWidth,
+    super.analysisHeight,
+    this.minFocusDistance = 0.0,
+    this.minZoomRatio = 1.0,
+    this.maxZoomRatio = 1.0,
+    this.exposureTimeRangeNs = const [1000000, 1000000000],
+    this.isoRange = const [100, 3200],
+  });
+
+  final double minFocusDistance;
+  final double minZoomRatio;
+  final double maxZoomRatio;
+  final List<int> exposureTimeRangeNs;
+  final List<int> isoRange;
+
+  factory CameraStartInfo.fromMap(Map<dynamic, dynamic> map) {
+    final info = CameraResolutionInfo.fromMap(map);
+    List<int> parseIntList(Object? value, {required List<int> fallback}) {
+      final raw = value as List?;
+      if (raw == null || raw.length < 2) return fallback;
+      return [
+        (raw[0] as num?)?.toInt() ?? fallback[0],
+        (raw[1] as num?)?.toInt() ?? fallback[1],
+      ];
+    }
+
+    return CameraStartInfo(
+      captureWidth: info.captureWidth,
+      captureHeight: info.captureHeight,
+      analysisWidth: info.analysisWidth,
+      analysisHeight: info.analysisHeight,
+      minFocusDistance: (map['minFocusDistance'] as num?)?.toDouble() ?? 0.0,
+      minZoomRatio: (map['minZoomRatio'] as num?)?.toDouble() ?? 1.0,
+      maxZoomRatio: (map['maxZoomRatio'] as num?)?.toDouble() ?? 1.0,
+      exposureTimeRangeNs: parseIntList(
+        map['exposureTimeRangeNs'],
+        fallback: const [1000000, 1000000000],
+      ),
+      isoRange: parseIntList(map['isoRange'], fallback: const [100, 3200]),
+    );
+  }
+}
+
+/// Result payload returned by dumping active camera settings to disk.
+class CameraSettingsDumpInfo {
+  const CameraSettingsDumpInfo({
+    this.filePath = '',
+    this.keyCount = 0,
+    this.supportedKeyCount = 0,
+  });
+
+  final String filePath;
+  final int keyCount;
+  final int supportedKeyCount;
+
+  factory CameraSettingsDumpInfo.fromMap(Map<dynamic, dynamic> map) {
+    return CameraSettingsDumpInfo(
+      filePath: map['filePath'] as String? ?? '',
+      keyCount: (map['keyCount'] as num?)?.toInt() ?? 0,
+      supportedKeyCount: (map['supportedKeyCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'filePath': filePath,
+    'keyCount': keyCount,
+    'supportedKeyCount': supportedKeyCount,
+  };
+}
 
 // ─── CameraValues ─────────────────────────────────────────────────────────────
 
@@ -118,6 +231,11 @@ class CameraInfo {
   final String captureResolution;
   final String analysisResolution;
 
+  factory CameraInfo.fromMap(Map<Object?, Object?> m) => CameraInfo(
+    frameCount: (m['frameCount'] as num?)?.toInt() ?? 0,
+    fps: (m['fps'] as num?)?.toDouble() ?? 0.0,
+  );
+
   CameraInfo copyWith({
     int? frameCount,
     double? fps,
@@ -131,30 +249,4 @@ class CameraInfo {
       analysisResolution: analysisResolution ?? this.analysisResolution,
     );
   }
-}
-
-// ─── CameraCallbacks ──────────────────────────────────────────────────────────
-
-/// Bundled camera-action callbacks passed to child widgets.
-///
-/// Grouping them here keeps widget constructors slim — widgets accept a single
-/// [CameraCallbacks] instead of 7+ individual function parameters.
-class CameraCallbacks {
-  const CameraCallbacks({
-    required this.onIsoChanged,
-    required this.onExposureTimeNsChanged,
-    required this.onFocusChanged,
-    required this.onZoomChanged,
-    required this.onLockWb,
-    required this.onUnlockWb,
-    required this.onToggleAf,
-  });
-
-  final void Function(int iso) onIsoChanged;
-  final void Function(int ns) onExposureTimeNsChanged;
-  final void Function(double dist) onFocusChanged;
-  final void Function(double ratio) onZoomChanged;
-  final VoidCallback onLockWb;
-  final VoidCallback onUnlockWb;
-  final VoidCallback onToggleAf;
 }

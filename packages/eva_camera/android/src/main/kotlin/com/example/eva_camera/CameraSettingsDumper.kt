@@ -1,4 +1,4 @@
-package com.example.eva_minimal_demo
+package com.example.eva_camera
 
 import android.content.Context
 import android.graphics.ImageFormat

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-14
+
+- Extracted camera stack into reusable Flutter plugin at `packages/eva_camera/` (Dart + Kotlin/CameraX).
+- App's `MainActivity.kt` reduced to minimal FrameProcessor registration; NativeStitcher stays in-app.
+- Added SCENE_MODE=DISABLED, CAPTURE_INTENT (with `CaptureIntent` enum toggle), ZSL capture mode, and TotalCaptureResult forwarded to FrameProcessor.
+- Unified capture API: single `captureImage()` + `setCaptureFormat(yuv|jpeg)` replacing separate `captureJpeg`/`captureYuv`; format switch triggers camera rebind via extracted `rebindUseCases()`.
+- ImageCapture defaults to YUV_420_888 via `setBufferFormat`; resolution bumped to 4208×3120 (capture) and 1280×960 (analysis).
+
 ## 2026-03-13 (update 43)
 
 - Added `DUMP SETTINGS` button to camera settings bar; tap now triggers an explicit camera settings dump.

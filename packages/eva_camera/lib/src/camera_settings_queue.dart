@@ -1,9 +1,9 @@
 import 'dart:async';
 
-enum CameraSettingKey { af, focus, iso, shutter, zoom, wb }
+import 'camera_state.dart' show CameraSettingType;
 
 typedef CameraSettingsQueueErrorHandler =
-    void Function(CameraSettingKey key, Object error);
+    void Function(CameraSettingType key, Object error);
 
 /// Serializes camera-setting writes while keeping only the latest pending value
 /// for each setting key.
@@ -88,7 +88,7 @@ class CameraSettingsQueue {
     _kick();
   }
 
-  void updateWbLock(bool locked) {
+  void updateWbLocked(bool locked) {
     _pendingWbLock = locked;
     _kick();
   }
@@ -122,14 +122,14 @@ class CameraSettingsQueue {
         if (_pendingAf != null) {
           final target = _pendingAf!;
           _pendingAf = null;
-          final ok = await _run(CameraSettingKey.af, () => _sendAf(target));
+          final ok = await _run(CameraSettingType.af, () => _sendAf(target));
           if (ok) _effectiveAfEnabled = target;
           continue;
         }
 
         if (_pendingFocus != null) {
           if (_effectiveAfEnabled) {
-            final ok = await _run(CameraSettingKey.af, () => _sendAf(false));
+            final ok = await _run(CameraSettingType.af, () => _sendAf(false));
             if (!ok) {
               // If AF cannot be disabled, drop pending manual focus and move on.
               _pendingFocus = null;
@@ -141,35 +141,35 @@ class CameraSettingsQueue {
 
           final distance = _pendingFocus!;
           _pendingFocus = null;
-          await _run(CameraSettingKey.focus, () => _sendFocus(distance));
+          await _run(CameraSettingType.focus, () => _sendFocus(distance));
           continue;
         }
 
         if (_pendingIso != null) {
           final iso = _pendingIso!;
           _pendingIso = null;
-          await _run(CameraSettingKey.iso, () => _sendIso(iso));
+          await _run(CameraSettingType.iso, () => _sendIso(iso));
           continue;
         }
 
         if (_pendingShutter != null) {
           final shutterNs = _pendingShutter!;
           _pendingShutter = null;
-          await _run(CameraSettingKey.shutter, () => _sendShutter(shutterNs));
+          await _run(CameraSettingType.shutter, () => _sendShutter(shutterNs));
           continue;
         }
 
         if (_pendingZoom != null) {
           final ratio = _pendingZoom!;
           _pendingZoom = null;
-          await _run(CameraSettingKey.zoom, () => _sendZoom(ratio));
+          await _run(CameraSettingType.zoom, () => _sendZoom(ratio));
           continue;
         }
 
         if (_pendingWbLock != null) {
           final locked = _pendingWbLock!;
           _pendingWbLock = null;
-          await _run(CameraSettingKey.wb, () => _sendWbLock(locked));
+          await _run(CameraSettingType.wb, () => _sendWbLock(locked));
           continue;
         }
       }
@@ -180,7 +180,7 @@ class CameraSettingsQueue {
   }
 
   Future<bool> _run(
-    CameraSettingKey key,
+    CameraSettingType key,
     Future<void> Function() action,
   ) async {
     try {

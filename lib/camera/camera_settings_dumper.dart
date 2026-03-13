@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'camera_control.dart';
+import 'package:eva_camera/eva_camera.dart';
 
 /// Service to handle dumping and formatting camera settings to disk.
 class CameraSettingsDumper {
@@ -7,10 +7,9 @@ class CameraSettingsDumper {
   static Future<void> dumpAndNotify(BuildContext context) async {
     try {
       final result = await CameraControl.dumpActiveCameraSettings();
-      final filePath = result['filePath'] as String? ?? '';
-      final keyCount = (result['keyCount'] as num?)?.toInt() ?? 0;
-      final supportedKeyCount =
-          (result['supportedKeyCount'] as num?)?.toInt() ?? 0;
+      final filePath = result.filePath;
+      final keyCount = result.keyCount;
+      final supportedKeyCount = result.supportedKeyCount;
 
       debugPrint('=== Camera settings dumped ===');
       debugPrint('Key count: $keyCount (supported: $supportedKeyCount)');
