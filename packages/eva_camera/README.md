@@ -212,13 +212,12 @@ All methods are static on `CameraControl`. Returns are `Future<void>` unless not
 
 ## Events (EventChannel)
 
-Subscribe to `CameraControl.events` to receive frame stats every 500 ms:
+Subscribe to `CameraControl.eventStream` to receive frame stats every 500 ms:
 
 ```dart
-CameraControl.events.receiveBroadcastStream().listen((data) {
-  final map = Map<String, dynamic>.from(data as Map);
-  final fps = map['fps'] as double;
-  final frames = map['frameCount'] as int;
+CameraControl.eventStream.listen((info) {
+  final fps = info.fps;
+  final frames = info.frameCount;
 });
 ```
 
