@@ -8,8 +8,6 @@ import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-
         EvaCameraPlugin.setFrameProcessor(
             object : FrameProcessor {
                 override fun processFrame(
@@ -40,5 +38,7 @@ class MainActivity : FlutterActivity() {
                 }
             },
         )
+
+        super.configureFlutterEngine(flutterEngine)
     }
 }
