@@ -10,11 +10,14 @@ import 'package:flutter/foundation.dart' show VoidCallback;
 
 // ─── CameraSettingType enum ────────────────────────────────────────────────────────
 
-/// Shared identifier for the adjustable camera controls used by the UI.
+/// Shared identifier for adjustable camera controls used across UI and queueing.
 ///
 /// Keep this enum lightweight: presentation metadata such as labels, icons,
 /// and auto/manual affordances belongs in the widgets that render the control.
-enum CameraSettingType { iso, shutter, focus, wb, zoom }
+///
+/// [af] is included for queue/error-reporting parity even though the current UI
+/// does not render it as a standalone settings chip.
+enum CameraSettingType { af, iso, shutter, focus, wb, zoom }
 
 /// Camera2 CONTROL_CAPTURE_INTENT values exposed to Dart.
 enum CaptureIntent { preview, stillCapture }
@@ -258,8 +261,7 @@ class CameraCallbacks {
     required this.onExposureTimeNsChanged,
     required this.onFocusChanged,
     required this.onZoomChanged,
-    required this.onLockWb,
-    required this.onUnlockWb,
+    required this.onWbLockChanged,
     required this.onToggleAf,
   });
 
@@ -267,7 +269,6 @@ class CameraCallbacks {
   final void Function(int ns) onExposureTimeNsChanged;
   final void Function(double dist) onFocusChanged;
   final void Function(double ratio) onZoomChanged;
-  final VoidCallback onLockWb;
-  final VoidCallback onUnlockWb;
+  final void Function(bool locked) onWbLockChanged;
   final VoidCallback onToggleAf;
 }

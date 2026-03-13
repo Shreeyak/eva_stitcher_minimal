@@ -654,42 +654,31 @@ class CameraManager(
         )
     }
 
-    // ── White balance — tap to lock / unlock ────────────────────────────
+    // ── White balance ────────────────────────────────────────────────────
 
     /**
      * Lock white balance: capture the current live AWB CCM + gains, then switch to
      * CONTROL_AWB_MODE_OFF with those values applied.
      */
-    fun lockWhiteBalance(callback: (Exception?) -> Unit) {
+    fun setWbLocked(
+        locked: Boolean,
+        callback: (Exception?) -> Unit,
+    ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
-        if (capturedColorTransform == null || capturedColorGains == null) {
+        if (locked && (capturedColorTransform == null || capturedColorGains == null)) {
             return callback(
                 IllegalStateException("No AWB data captured yet — wait for camera to stabilize"),
             )
         }
-        wbLocked = true
+        val previous = wbLocked
+        wbLocked = locked
         applyAllCaptureOptions(cam) { e ->
             if (e != null) {
-                wbLocked = false
+                wbLocked = previous
                 callback(e)
             } else {
-                Log.i(TAG, "WB locked with captured CCM + gains")
-                pushSettingsStatus()
-                callback(null)
-            }
-        }
-    }
-
-    /** Unlock white balance: return to CONTROL_AWB_MODE_AUTO. */
-    fun unlockWhiteBalance(callback: (Exception?) -> Unit) {
-        val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
-        wbLocked = false
-        applyAllCaptureOptions(cam) { e ->
-            if (e != null) {
-                wbLocked = true
-                callback(e)
-            } else {
-                Log.i(TAG, "WB unlocked — AUTO")
+                val message = if (locked) "WB locked with captured CCM + gains" else "WB unlocked — AUTO"
+                Log.i(TAG, message)
                 pushSettingsStatus()
                 callback(null)
             }

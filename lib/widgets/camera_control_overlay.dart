@@ -7,7 +7,7 @@ import 'camera_ruler_dial/camera_ruler_dial.dart';
 /// Floating camera-control overlay shown above the bottom settings strip.
 ///
 /// Renders either a [CameraRulerDial] for numeric parameters or a compact
-/// WB action panel for white-balance lock/unlock.
+/// WB action panel for white-balance auto/lock.
 class CameraControlOverlay extends StatelessWidget {
   const CameraControlOverlay({
     super.key,
@@ -29,8 +29,7 @@ class CameraControlOverlay extends StatelessWidget {
     if (param == CameraSettingType.wb) {
       return _WbControlPanel(
         wbLocked: values.wbLocked,
-        onLockWb: callbacks.onLockWb,
-        onUnlockWb: callbacks.onUnlockWb,
+        onWbLockChanged: callbacks.onWbLockChanged,
       );
     }
 
@@ -66,6 +65,7 @@ class CameraControlOverlay extends StatelessWidget {
           onFocusChanged: callbacks.onFocusChanged,
         ).toModel();
         break;
+      case CameraSettingType.af:
       case CameraSettingType.wb:
         // Unreachable — WB is handled by the guard at the top of build().
         return const SizedBox.shrink();
@@ -100,13 +100,11 @@ class CameraControlOverlay extends StatelessWidget {
 class _WbControlPanel extends StatelessWidget {
   const _WbControlPanel({
     required this.wbLocked,
-    required this.onLockWb,
-    required this.onUnlockWb,
+    required this.onWbLockChanged,
   });
 
   final bool wbLocked;
-  final VoidCallback onLockWb;
-  final VoidCallback onUnlockWb;
+  final ValueChanged<bool> onWbLockChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -138,9 +136,7 @@ class _WbControlPanel extends StatelessWidget {
         ],
         selected: {wbLocked},
         onSelectionChanged: (Set<bool> selection) {
-          final locked = selection.first;
-          if (locked && !wbLocked) onLockWb();
-          if (!locked && wbLocked) onUnlockWb();
+          onWbLockChanged(selection.first);
         },
       ),
     );

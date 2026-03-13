@@ -191,28 +191,15 @@ class EvaCameraPlugin :
                     }
                 }
 
-                "lockWhiteBalance" -> {
-                    manager.lockWhiteBalance { error ->
+                "setWbLocked" -> {
+                    val locked = call.argument<Boolean>("locked") ?: false
+                    manager.setWbLocked(locked) { error ->
                         if (error != null) {
-                            result.error("WB_LOCK_FAILED", error.message, null)
+                            result.error("WB_SET_FAILED", error.message, null)
                         } else {
-                            result.success(true)
+                            result.success(null)
                         }
                     }
-                }
-
-                "unlockWhiteBalance" -> {
-                    manager.unlockWhiteBalance { error ->
-                        if (error != null) {
-                            result.error("WB_UNLOCK_FAILED", error.message, null)
-                        } else {
-                            result.success(true)
-                        }
-                    }
-                }
-
-                "isWbLocked" -> {
-                    result.success(manager.isWbLocked())
                 }
 
                 "setAfEnabled" -> {

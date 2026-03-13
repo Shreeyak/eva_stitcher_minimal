@@ -185,11 +185,9 @@ All methods are static on `CameraControl`. Returns are `Future<void>` unless not
 
 ### White Balance
 
-| Method                 | Returns | Description                 |
-| ---------------------- | ------- | --------------------------- |
-| `lockWhiteBalance()`   | `bool`  | Freeze AWB gains+CCM        |
-| `unlockWhiteBalance()` | `bool`  | Resume AWB                  |
-| `isWbLocked()`         | `bool`  | Query current WB lock state |
+| Method              | Returns | Description                         |
+| ------------------- | ------- | ----------------------------------- |
+| `setWbLocked(bool)` | —       | Toggle between AWB auto and WB lock |
 
 ### Zoom
 

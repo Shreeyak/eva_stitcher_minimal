@@ -98,8 +98,7 @@ class _CameraScreenState extends State<CameraScreen> {
       onExposureTimeNsChanged: _onExposureTimeNsChanged,
       onFocusChanged: _onFocusChanged,
       onZoomChanged: _onZoomChanged,
-      onLockWb: _lockWb,
-      onUnlockWb: _unlockWb,
+      onWbLockChanged: _setWbLocked,
       onToggleAf: _toggleAf,
     );
     _initCamera();
@@ -116,33 +115,27 @@ class _CameraScreenState extends State<CameraScreen> {
       sendIso: CameraControl.setIso,
       sendShutter: CameraControl.setExposureTimeNs,
       sendZoom: CameraControl.setZoomRatio,
-      sendWbLock: (locked) async {
-        if (locked) {
-          await CameraControl.lockWhiteBalance();
-        } else {
-          await CameraControl.unlockWhiteBalance();
-        }
-      },
+      sendWbLock: CameraControl.setWbLocked,
       initialAfEnabled: _values.afEnabled,
       onError: (key, error) {
         if (!mounted) return;
         switch (key) {
-          case CameraSettingKey.af:
+          case CameraSettingType.af:
             _showError('AF update failed: $error');
             break;
-          case CameraSettingKey.focus:
+          case CameraSettingType.focus:
             _showError('Focus update failed: $error');
             break;
-          case CameraSettingKey.iso:
+          case CameraSettingType.iso:
             _showWarning('ISO update failed: $error');
             break;
-          case CameraSettingKey.shutter:
+          case CameraSettingType.shutter:
             _showWarning('Shutter update failed: $error');
             break;
-          case CameraSettingKey.zoom:
+          case CameraSettingType.zoom:
             _showWarning('Zoom update failed: $error');
             break;
-          case CameraSettingKey.wb:
+          case CameraSettingType.wb:
             _showWarning('WB update failed: $error');
             // Revert to the last confirmed native WB state.
             // Using _committedWbLocked (captured before the optimistic flip)
@@ -313,20 +306,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
   // ── Camera actions ────────────────────────────────────────────────
 
-  Future<void> _lockWb() async {
+  Future<void> _setWbLocked(bool locked) async {
     if (!mounted) return;
     // Save pre-optimistic state so the error handler can revert correctly.
     _committedWbLocked = _values.wbLocked;
-    setState(() => _values = _values.copyWith(wbLocked: true));
-    _settingsQueue.updateWbLock(true);
-  }
-
-  Future<void> _unlockWb() async {
-    if (!mounted) return;
-    // Save pre-optimistic state so the error handler can revert correctly.
-    _committedWbLocked = _values.wbLocked;
-    setState(() => _values = _values.copyWith(wbLocked: false));
-    _settingsQueue.updateWbLock(false);
+    setState(() => _values = _values.copyWith(wbLocked: locked));
+    _settingsQueue.updateWbLocked(locked);
   }
 
   Future<void> _toggleAf() async {
@@ -457,8 +442,9 @@ class _CameraScreenState extends State<CameraScreen> {
         _toggleAf();
         break;
       case CameraSettingType.wb:
-        _values.wbLocked ? _unlockWb() : _lockWb();
+        _setWbLocked(!_values.wbLocked);
         break;
+      case CameraSettingType.af:
       default:
         break;
     }
@@ -541,7 +527,9 @@ class _CameraScreenState extends State<CameraScreen> {
                           child: AspectRatio(
                             aspectRatio: 4 / 3,
                             child: GestureDetector(
-                              onTap: _cameraStarted ? _lockWb : null,
+                              onTap: _cameraStarted
+                                  ? () => _setWbLocked(true)
+                                  : null,
                               child: Container(
                                 decoration: BoxDecoration(
                                   border: Border.all(
@@ -701,7 +689,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Widget _buildCameraPreview() {
     return PlatformViewLink(
-      viewType: 'camerax-preview',
+      viewType: CameraControl.previewViewType,
       surfaceFactory: (context, controller) {
         return AndroidViewSurface(
           controller: controller as AndroidViewController,
@@ -712,7 +700,7 @@ class _CameraScreenState extends State<CameraScreen> {
       onCreatePlatformView: (params) {
         return PlatformViewsService.initExpensiveAndroidView(
             id: params.id,
-            viewType: 'camerax-preview',
+            viewType: CameraControl.previewViewType,
             layoutDirection: TextDirection.ltr,
             creationParamsCodec: const StandardMessageCodec(),
           )

@@ -14,6 +14,8 @@ class CameraControl {
   static const _method = MethodChannel('com.example.eva/control');
   static const _events = EventChannel('com.example.eva/events');
 
+  static const String previewViewType = 'camerax-preview';
+
   static Future<bool> requestPermission() async {
     final granted = await _method.invokeMethod<bool>('requestPermission');
     return granted ?? false;
@@ -82,20 +84,8 @@ class CameraControl {
 
   // ── White balance ──────────────────────────────────────────────────
 
-  static Future<bool> lockWhiteBalance() async {
-    final ok = await _method.invokeMethod<bool>('lockWhiteBalance');
-    return ok ?? false;
-  }
-
-  static Future<bool> unlockWhiteBalance() async {
-    final ok = await _method.invokeMethod<bool>('unlockWhiteBalance');
-    return ok ?? false;
-  }
-
-  static Future<bool> isWbLocked() async {
-    final locked = await _method.invokeMethod<bool>('isWbLocked');
-    return locked ?? false;
-  }
+  static Future<void> setWbLocked(bool locked) =>
+      _method.invokeMethod('setWbLocked', {'locked': locked});
 
   // ── Auto exposure ─────────────────────────────────────────────────
 
