@@ -40,7 +40,6 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.plugin.common.EventChannel
 import java.io.File
-import java.io.PrintWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -95,6 +94,9 @@ class CameraManager(
 
     // Focus distance captured from live AF results
     @Volatile private var capturedFocusDistance: Float? = null
+
+    // Capture results (latest full telemetry)
+    @Volatile private var latestCaptureResult: TotalCaptureResult? = null
 
     // WB lock: captured from live AWB TotalCaptureResults
     @Volatile private var capturedColorTransform: ColorSpaceTransform? = null
@@ -276,6 +278,9 @@ class CameraManager(
                                                 )
                                             }
                                     }
+
+                                    // Store latest capture result for diagnostic dumps
+                                    latestCaptureResult = result
                                 }
                             },
                         )
@@ -353,6 +358,7 @@ class CameraManager(
         stopFpsTimer()
         cameraProvider?.unbindAll()
         camera = null
+        latestCaptureResult = null
         imageCapture = null
         imageAnalysis?.clearAnalyzer()
         imageAnalysis = null
@@ -360,15 +366,20 @@ class CameraManager(
         availableAeTargetFpsRanges = emptyArray()
         aeTargetFpsRange = null
 
-        cameraExecutor?.let { executor ->
-            executor.shutdown()
-            try {
-                if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                    executor.shutdownNow()
-                }
-            } catch (_: InterruptedException) {
+        val executor = cameraExecutor
+        if (executor == null) {
+            cameraExecutor = null
+            return
+        }
+
+        executor.shutdown()
+        try {
+            val terminated = executor.awaitTermination(2, TimeUnit.SECONDS)
+            if (!terminated) {
                 executor.shutdownNow()
             }
+        } catch (_: InterruptedException) {
+            executor.shutdownNow()
         }
         cameraExecutor = null
     }
@@ -753,6 +764,16 @@ class CameraManager(
         )
     }
 
+    /**
+     * Dumps all available CameraCharacteristics keys and active camera properties for
+     * the currently bound CameraX camera instance.
+     */
+    fun dumpActiveCameraSettings(callback: (Map<String, Any>?, Exception?) -> Unit) {
+        val cam = camera ?: return callback(null, IllegalStateException("Camera not ready"))
+
+        CameraSettingsDumper.dump(context, cam, latestCaptureResult, callback)
+    }
+
     // ── Resolution info ─────────────────────────────────────────────────
 
     fun getResolutionInfo(): Map<String, Any> = gatherResolutionInfo()
@@ -911,597 +932,7 @@ class CameraManager(
 
         Log.i(TAG, "Exposure range: $exposureRange → using ${storedExposureTimeNs}ns")
         Log.i(TAG, "Sensitivity range: $sensitivityRange → using ISO $storedSensitivityIso")
-
-        // Dump all characteristics to a debug file
-        dumpCameraCharacteristics(cam2Info)
     }
-
-    /**
-     * Dumps every available CameraCharacteristics key+value to a text file.
-     *
-     * Output: <app-external-files>/camera_dump.txt Readable at:
-     * /sdcard/Android/data/com.example.eva_minimal_demo/files/camera_dump.txt (No special
-     * permissions required on Android 10+)
-     */
-    @OptIn(ExperimentalCamera2Interop::class)
-    @Suppress("UNCHECKED_CAST")
-    private fun dumpCameraCharacteristics(cam2Info: Camera2CameraInfo) {
-        val outDir = context.getExternalFilesDir(null) ?: context.filesDir
-        val outFile = File(outDir, "camera_dump.txt")
-
-        try {
-            PrintWriter(outFile).use { pw ->
-                val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
-                pw.println("# Camera2 Characteristics Dump")
-                pw.println("# Generated: $ts")
-                pw.println(
-                    "# Device: ${Build.MANUFACTURER} ${Build.MODEL} (API ${Build.VERSION.SDK_INT})",
-                )
-                pw.println()
-
-                // ── Sensor geometry ──────────────────────────────────────
-                section(pw, "SENSOR GEOMETRY")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_ACTIVE_ARRAY_SIZE",
-                    CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_PIXEL_ARRAY_SIZE",
-                    CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_PHYSICAL_SIZE",
-                    CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE",
-                    CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE,
-                )
-
-                // ── Exposure / sensitivity ───────────────────────────────
-                section(pw, "EXPOSURE & SENSITIVITY")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_EXPOSURE_TIME_RANGE",
-                    CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_SENSITIVITY_RANGE",
-                    CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_MAX_ANALOG_SENSITIVITY",
-                    CameraCharacteristics.SENSOR_MAX_ANALOG_SENSITIVITY,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_MAX_FRAME_DURATION",
-                    CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AE_COMPENSATION_RANGE",
-                    CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AE_COMPENSATION_STEP",
-                    CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES",
-                    CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AE_AVAILABLE_MODES",
-                    CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AE_LOCK_AVAILABLE",
-                    CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE,
-                )
-
-                // ── Lens optics ──────────────────────────────────────────
-                section(pw, "LENS OPTICS")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_INFO_AVAILABLE_FOCAL_LENGTHS",
-                    CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_INFO_AVAILABLE_APERTURES",
-                    CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_INFO_AVAILABLE_FILTER_DENSITIES",
-                    CameraCharacteristics.LENS_INFO_AVAILABLE_FILTER_DENSITIES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION",
-                    CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_INFO_FOCUS_DISTANCE_CALIBRATION",
-                    CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_INFO_HYPERFOCAL_DISTANCE",
-                    CameraCharacteristics.LENS_INFO_HYPERFOCAL_DISTANCE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_INFO_MINIMUM_FOCUS_DISTANCE",
-                    CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE,
-                )
-                dumpKey(pw, cam2Info, "LENS_FACING", CameraCharacteristics.LENS_FACING)
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_POSE_REFERENCE",
-                    CameraCharacteristics.LENS_POSE_REFERENCE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_INTRINSIC_CALIBRATION",
-                    CameraCharacteristics.LENS_INTRINSIC_CALIBRATION,
-                )
-                dumpKey(pw, cam2Info, "LENS_DISTORTION", CameraCharacteristics.LENS_DISTORTION)
-                @Suppress("DEPRECATION")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "LENS_RADIAL_DISTORTION (deprecated)",
-                    CameraCharacteristics.LENS_RADIAL_DISTORTION,
-                )
-
-                // ── Focus / AF ───────────────────────────────────────────
-                section(pw, "FOCUS / AF")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AF_AVAILABLE_MODES",
-                    CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES,
-                )
-
-                // ── AWB / colour ─────────────────────────────────────────
-                section(pw, "AWB / COLOUR")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AWB_AVAILABLE_MODES",
-                    CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AWB_LOCK_AVAILABLE",
-                    CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_COLOR_TRANSFORM1",
-                    CameraCharacteristics.SENSOR_COLOR_TRANSFORM1,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_COLOR_TRANSFORM2",
-                    CameraCharacteristics.SENSOR_COLOR_TRANSFORM2,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_FORWARD_MATRIX1",
-                    CameraCharacteristics.SENSOR_FORWARD_MATRIX1,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_FORWARD_MATRIX2",
-                    CameraCharacteristics.SENSOR_FORWARD_MATRIX2,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_CALIBRATION_TRANSFORM1",
-                    CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM1,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_CALIBRATION_TRANSFORM2",
-                    CameraCharacteristics.SENSOR_CALIBRATION_TRANSFORM2,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_REFERENCE_ILLUMINANT1",
-                    CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_REFERENCE_ILLUMINANT2",
-                    CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_BLACK_LEVEL_PATTERN",
-                    CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_COLOR_FILTER_ARRANGEMENT",
-                    CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SENSOR_INFO_WHITE_LEVEL",
-                    CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL,
-                )
-
-                // ── Noise reduction ──────────────────────────────────────
-                section(pw, "NOISE REDUCTION / EDGE / ISP")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES",
-                    CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "EDGE_AVAILABLE_EDGE_MODES",
-                    CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES",
-                    CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES",
-                    CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SHADING_AVAILABLE_MODES",
-                    CameraCharacteristics.SHADING_AVAILABLE_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "TONEMAP_AVAILABLE_TONE_MAP_MODES",
-                    CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "TONEMAP_MAX_CURVE_POINTS",
-                    CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS,
-                )
-
-                // ── Flash / torch ────────────────────────────────────────
-                section(pw, "FLASH / TORCH")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "FLASH_INFO_AVAILABLE",
-                    CameraCharacteristics.FLASH_INFO_AVAILABLE,
-                )
-                if (Build.VERSION.SDK_INT >= 33) {
-                    dumpKey(
-                        pw,
-                        cam2Info,
-                        "FLASH_INFO_STRENGTH_MAXIMUM_LEVEL",
-                        CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL,
-                    )
-                    dumpKey(
-                        pw,
-                        cam2Info,
-                        "FLASH_INFO_STRENGTH_DEFAULT_LEVEL",
-                        CameraCharacteristics.FLASH_INFO_STRENGTH_DEFAULT_LEVEL,
-                    )
-                }
-
-                // ── Zoom / crop ──────────────────────────────────────────
-                section(pw, "ZOOM / CROP")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SCALER_AVAILABLE_MAX_DIGITAL_ZOOM",
-                    CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "SCALER_CROPPING_TYPE",
-                    CameraCharacteristics.SCALER_CROPPING_TYPE,
-                )
-                if (Build.VERSION.SDK_INT >= 30) {
-                    dumpKey(
-                        pw,
-                        cam2Info,
-                        "CONTROL_ZOOM_RATIO_RANGE",
-                        CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE,
-                    )
-                }
-
-                // ── Video stabilisation ──────────────────────────────────
-                section(pw, "STABILISATION")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES",
-                    CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES,
-                )
-
-                // ── Capabilities & hardware level ────────────────────────
-                section(pw, "CAPABILITIES")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "INFO_SUPPORTED_HARDWARE_LEVEL",
-                    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "REQUEST_AVAILABLE_CAPABILITIES",
-                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "REQUEST_MAX_NUM_OUTPUT_RAW",
-                    CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_RAW,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "REQUEST_MAX_NUM_OUTPUT_PROC",
-                    CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_PROC,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "REQUEST_MAX_NUM_OUTPUT_PROC_STALLING",
-                    CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_PROC_STALLING,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "REQUEST_PARTIAL_RESULT_COUNT",
-                    CameraCharacteristics.REQUEST_PARTIAL_RESULT_COUNT,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "REQUEST_PIPELINE_MAX_DEPTH",
-                    CameraCharacteristics.REQUEST_PIPELINE_MAX_DEPTH,
-                )
-
-                // ── Scene modes ──────────────────────────────────────────
-                section(pw, "SCENE / EFFECT MODES")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AVAILABLE_SCENE_MODES",
-                    CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_AVAILABLE_EFFECTS",
-                    CameraCharacteristics.CONTROL_AVAILABLE_EFFECTS,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_MAX_REGIONS_AF",
-                    CameraCharacteristics.CONTROL_MAX_REGIONS_AF,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_MAX_REGIONS_AE",
-                    CameraCharacteristics.CONTROL_MAX_REGIONS_AE,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "CONTROL_MAX_REGIONS_AWB",
-                    CameraCharacteristics.CONTROL_MAX_REGIONS_AWB,
-                )
-
-                // ── Sync / latency ───────────────────────────────────────
-                section(pw, "SYNC / LATENCY")
-                dumpKey(pw, cam2Info, "SYNC_MAX_LATENCY", CameraCharacteristics.SYNC_MAX_LATENCY)
-
-                // ── JPEG ─────────────────────────────────────────────────
-                section(pw, "JPEG")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "JPEG_AVAILABLE_THUMBNAIL_SIZES",
-                    CameraCharacteristics.JPEG_AVAILABLE_THUMBNAIL_SIZES,
-                )
-
-                // ── Statistics ───────────────────────────────────────────
-                section(pw, "STATISTICS")
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES",
-                    CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "STATISTICS_INFO_MAX_FACE_COUNT",
-                    CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "STATISTICS_INFO_AVAILABLE_HOT_PIXEL_MAP_MODES",
-                    CameraCharacteristics.STATISTICS_INFO_AVAILABLE_HOT_PIXEL_MAP_MODES,
-                )
-                dumpKey(
-                    pw,
-                    cam2Info,
-                    "STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES",
-                    CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES,
-                )
-
-                pw.println()
-                pw.println("# --- END OF DUMP ---")
-            }
-
-            Log.i(TAG, "Camera characteristics dumped to: ${outFile.absolutePath}")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to dump camera characteristics", e)
-        }
-    }
-
-    /** Print a section header to the dump file. */
-    private fun section(
-        pw: PrintWriter,
-        title: String,
-    ) {
-        pw.println()
-        pw.println("# ── $title " + "─".repeat(maxOf(0, 60 - title.length)))
-    }
-
-    /**
-     * Query one CameraCharacteristics key via Camera2CameraInfo and print it. Null means the device
-     * doesn't support/expose this characteristic.
-     */
-    @OptIn(ExperimentalCamera2Interop::class)
-    private fun <T> dumpKey(
-        pw: PrintWriter,
-        cam2Info: Camera2CameraInfo,
-        label: String,
-        key: CameraCharacteristics.Key<T>,
-    ) {
-        val value: T? =
-            try {
-                cam2Info.getCameraCharacteristic(key)
-            } catch (e: Exception) {
-                null
-            }
-        val formatted =
-            when (value) {
-                null -> "<not supported>"
-                is FloatArray -> value.joinToString(", ") { "%.6f".format(it) }
-                is IntArray -> value.joinToString(", ")
-                is LongArray -> value.joinToString(", ")
-                is ByteArray -> value.joinToString(", ") { it.toInt().and(0xFF).toString() }
-                is Array<*> -> value.joinToString(", ") { formatCharValue(it) }
-                else -> formatCharValue(value)
-            }
-        pw.println("%-55s %s".format(label, formatted))
-    }
-
-    /** Pretty-format a single CameraCharacteristics value (not arrays). */
-    private fun formatCharValue(v: Any?): String =
-        when (v) {
-            null -> {
-                "null"
-            }
-
-            is android.util.Range<*> -> {
-                "[${v.lower}, ${v.upper}]"
-            }
-
-            is android.util.Size -> {
-                "${v.width}x${v.height}"
-            }
-
-            is android.util.SizeF -> {
-                "${v.width}x${v.height}"
-            }
-
-            is android.util.Rational -> {
-                "${v.numerator}/${v.denominator}"
-            }
-
-            is android.graphics.Rect -> {
-                "(${v.left},${v.top})-(${v.right},${v.bottom})"
-            }
-
-            is android.hardware.camera2.params.BlackLevelPattern -> {
-                "[${v.getOffsetForIndex(0,0)}, ${v.getOffsetForIndex(1,0)}, " +
-                    "${v.getOffsetForIndex(0,1)}, ${v.getOffsetForIndex(1,1)}]"
-            }
-
-            is ColorSpaceTransform -> {
-                buildString {
-                    append("[")
-                    for (row in 0..2) {
-                        for (col in 0..2) {
-                            // ColorSpaceTransform stores 9 rationals in row-major order
-                            append(
-                                "${v.getElement(col, row).numerator}/${v.getElement(col, row).denominator}",
-                            )
-                            if (!(row == 2 && col == 2)) append(", ")
-                        }
-                    }
-                    append("]")
-                }
-            }
-
-            is android.hardware.camera2.params.StreamConfigurationMap -> {
-                "<StreamConfigurationMap — see log>"
-            }
-
-            else -> {
-                v.toString()
-            }
-        }
 
     /** Write EXIF orientation tag to saved JPEG. */
     private fun writeExifRotation(

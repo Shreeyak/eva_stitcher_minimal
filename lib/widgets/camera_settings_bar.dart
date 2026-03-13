@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../camera/camera_settings_dumper.dart';
 import '../camera/camera_state.dart';
 import 'bottom_bar_buttons.dart';
 
@@ -113,6 +114,14 @@ class CameraSettingsBar extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+
+          const SizedBox(width: 24),
+
+          BottomBarActionButton(
+            icon: Icons.file_download_outlined,
+            label: 'DUMP SETTINGS',
+            onTap: () => CameraSettingsDumper.dumpAndNotify(context),
           ),
         ],
       ),
