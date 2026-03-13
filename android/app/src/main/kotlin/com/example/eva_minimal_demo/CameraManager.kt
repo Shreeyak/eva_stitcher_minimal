@@ -2,7 +2,6 @@ package com.example.eva_minimal_demo
 
 import android.content.ContentValues
 import android.content.Context
-import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
@@ -41,7 +40,6 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.plugin.common.EventChannel
 import java.io.File
-import java.lang.reflect.Modifier
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -360,6 +358,7 @@ class CameraManager(
         stopFpsTimer()
         cameraProvider?.unbindAll()
         camera = null
+        latestCaptureResult = null
         imageCapture = null
         imageAnalysis?.clearAnalyzer()
         imageAnalysis = null

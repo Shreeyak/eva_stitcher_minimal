@@ -276,12 +276,14 @@ class _CameraScreenState extends State<CameraScreen> {
   void _showError(String msg) {
     if (!mounted) return;
     final cs = Theme.of(context).colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final double hMargin = screenWidth >= 600 ? screenWidth * 0.2 : 16.0;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
         backgroundColor: cs.errorContainer.withAlpha(217), // 0.85 alpha
         elevation: 4,
-        width: MediaQuery.of(context).size.width * 0.85,
+        margin: EdgeInsets.only(left: hMargin, right: hMargin, bottom: 92),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(color: cs.error.withAlpha(50)),

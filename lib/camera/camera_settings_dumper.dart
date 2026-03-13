@@ -3,7 +3,7 @@ import 'camera_control.dart';
 
 /// Service to handle dumping and formatting camera settings to disk.
 class CameraSettingsDumper {
-  /// Invokes the native dump and shows a persistent SnackBar with the result.
+  /// Invokes the native dump and shows a SnackBar with the result.
   static Future<void> dumpAndNotify(BuildContext context) async {
     try {
       final result = await CameraControl.dumpActiveCameraSettings();
@@ -32,14 +32,15 @@ class CameraSettingsDumper {
     int supportedKeyCount,
   ) {
     final cs = Theme.of(context).colorScheme;
-    final fileName = filePath.split('/').last;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final double hMargin = screenWidth >= 600 ? screenWidth * 0.15 : 16.0;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
         backgroundColor: cs.surfaceContainerHigh.withAlpha(217),
         elevation: 4,
-        margin: const EdgeInsets.only(left: 128, right: 128, bottom: 60),
+        margin: EdgeInsets.only(left: hMargin, right: hMargin, bottom: 60),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(color: cs.outlineVariant.withAlpha(80)),
@@ -63,9 +64,9 @@ class CameraSettingsDumper {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Captured $supportedKeyCount keys to $fileName',
+                    'Saved to: $filePath',
                     style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -85,6 +86,8 @@ class CameraSettingsDumper {
 
   static void _showErrorSnackBar(BuildContext context, String error) {
     final cs = Theme.of(context).colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final double hMargin = screenWidth >= 600 ? screenWidth * 0.2 : 16.0;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -93,7 +96,7 @@ class CameraSettingsDumper {
         ),
         backgroundColor: cs.errorContainer,
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.only(left: 128, right: 128, bottom: 60),
+        margin: EdgeInsets.only(left: hMargin, right: hMargin, bottom: 60),
       ),
     );
   }

@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-03-12 (update 43)
+## 2026-03-13 (update 43)
 
 - Added `DUMP SETTINGS` button to camera settings bar; tap now triggers an explicit camera settings dump.
 - Removed old startup auto-dump behavior so characteristics are captured only on user request.
