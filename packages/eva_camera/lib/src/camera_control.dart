@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 import 'camera_state.dart'
     show
+        CameraInfo,
         CameraResolutionInfo,
         CameraSettingsDumpInfo,
         CameraStartInfo,
@@ -132,7 +133,13 @@ class CameraControl {
     return CameraResolutionInfo.fromMap(result ?? const {});
   }
 
-  /// Broadcast stream of status events pushed from Kotlin every ~500 ms.
-  static Stream<Map<dynamic, dynamic>> get eventStream =>
-      _events.receiveBroadcastStream().map((e) => e as Map<dynamic, dynamic>);
+  /// Broadcast stream of camera telemetry pushed from Kotlin every ~500 ms.
+  static Stream<CameraInfo> get eventStream => _events
+      .receiveBroadcastStream()
+      .where((e) => (e as Map)['tag'] == 'fps')
+      .map(
+        (e) => CameraInfo.fromMap(
+          ((e as Map)['data'] as Map).cast<Object?, Object?>(),
+        ),
+      );
 }

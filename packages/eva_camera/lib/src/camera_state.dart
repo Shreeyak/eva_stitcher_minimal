@@ -234,6 +234,11 @@ class CameraInfo {
   final String captureResolution;
   final String analysisResolution;
 
+  factory CameraInfo.fromMap(Map<Object?, Object?> m) => CameraInfo(
+    frameCount: (m['frameCount'] as num?)?.toInt() ?? 0,
+    fps: (m['fps'] as num?)?.toDouble() ?? 0.0,
+  );
+
   CameraInfo copyWith({
     int? frameCount,
     double? fps,

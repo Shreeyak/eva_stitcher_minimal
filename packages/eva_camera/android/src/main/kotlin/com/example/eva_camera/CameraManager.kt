@@ -393,8 +393,6 @@ class CameraManager(
                 } else {
                     val payload = if (includeCapabilitiesInResult) gatherStartupInfo(cam) else gatherResolutionInfo()
                     callback(payload, null)
-                    pushEvent("status", "camera", "Camera started")
-                    pushSettingsStatus()
                 }
             }
         } catch (e: Exception) {
@@ -543,7 +541,6 @@ class CameraManager(
                 afEnabled = prev
                 callback(e)
             } else {
-                pushSettingsStatus()
                 callback(null)
             }
         }
@@ -574,7 +571,6 @@ class CameraManager(
                 aeEnabled = prev
                 callback(e)
             } else {
-                pushSettingsStatus()
                 callback(null)
             }
         }
@@ -648,7 +644,6 @@ class CameraManager(
             } else {
                 val message = if (locked) "WB locked with captured CCM + gains" else "WB unlocked — AUTO"
                 Log.i(TAG, message)
-                pushSettingsStatus()
                 callback(null)
             }
         }
@@ -1009,18 +1004,5 @@ class CameraManager(
         val event = mutableMapOf<String, Any>("type" to type, "tag" to tag, "message" to message)
         if (data.isNotEmpty()) event["data"] = data
         mainHandler.post { eventSink?.success(event) }
-    }
-
-    /** Push current AF/exposure/WB status to Dart. */
-    private fun pushSettingsStatus() {
-        val afLabel = if (afEnabled) "ON" else "OFF"
-        val exposureLabel = if (aeEnabled) "Auto" else "Manual"
-        val wbLabel = if (wbLocked) "Locked" else "Auto"
-        pushEvent(
-            "status",
-            "cameraSettings",
-            "AF: $afLabel | Exposure: $exposureLabel | WB: $wbLabel",
-            mapOf("afEnabled" to afEnabled, "aeEnabled" to aeEnabled, "wbLocked" to wbLocked),
-        )
     }
 }

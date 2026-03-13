@@ -63,7 +63,7 @@ class _CameraScreenState extends State<CameraScreen> {
   late final CameraCallbacks _callbacks;
 
   // ── EventChannel ──────────────────────────────────────────────────
-  StreamSubscription<Map<dynamic, dynamic>>? _eventSub;
+  StreamSubscription<CameraInfo>? _eventSub;
 
   // ── Camera command sequencing ─────────────────────────────────────
   late final CameraSettingsQueue _settingsQueue;
@@ -216,28 +216,11 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   void _listenToEvents() {
-    _eventSub = CameraControl.eventStream.listen((event) {
+    _eventSub = CameraControl.eventStream.listen((info) {
       if (!mounted) return;
-      final type = event['type'] as String? ?? 'status';
-      final tag = event['tag'] as String? ?? '';
-      final message = event['message'] as String? ?? '';
-      final data = event['data'] as Map? ?? {};
-
-      if (tag == 'fps') {
-        setState(() {
-          _info = _info.copyWith(
-            frameCount:
-                (data['frameCount'] as num?)?.toInt() ?? _info.frameCount,
-            fps: (data['fps'] as num?)?.toDouble() ?? _info.fps,
-          );
-        });
-      } else if (tag == 'cameraSettings') {
-        debugPrint('cameraSettings: $message');
-      } else if (type == 'warning') {
-        _showWarning(message);
-      } else if (type == 'error') {
-        _showError(message);
-      }
+      setState(() {
+        _info = _info.copyWith(frameCount: info.frameCount, fps: info.fps);
+      });
     }, onError: (e) => debugPrint('Event stream error: $e'));
   }
 
