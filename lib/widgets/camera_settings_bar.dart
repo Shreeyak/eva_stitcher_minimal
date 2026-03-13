@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../camera/camera_settings_dumper.dart';
 import '../camera/camera_state.dart';
 import 'bottom_bar_buttons.dart';
 
@@ -8,7 +9,6 @@ class CameraSettingsBar extends StatelessWidget {
   final CameraValues values;
   final CameraCallbacks callbacks;
   final VoidCallback onToggleSettings;
-  final VoidCallback onDumpSettings;
   final ValueChanged<CameraSettingType?> onSettingChipTap;
 
   const CameraSettingsBar({
@@ -17,7 +17,6 @@ class CameraSettingsBar extends StatelessWidget {
     required this.values,
     required this.callbacks,
     required this.onToggleSettings,
-    required this.onDumpSettings,
     required this.onSettingChipTap,
   });
 
@@ -122,7 +121,7 @@ class CameraSettingsBar extends StatelessWidget {
           BottomBarActionButton(
             icon: Icons.file_download_outlined,
             label: 'DUMP SETTINGS',
-            onTap: onDumpSettings,
+            onTap: () => CameraSettingsDumper.dumpAndNotify(context),
           ),
         ],
       ),

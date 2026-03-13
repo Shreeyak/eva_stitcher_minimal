@@ -504,79 +504,6 @@ class _CameraScreenState extends State<CameraScreen> {
     ).showSnackBar(const SnackBar(content: Text('Export not yet implemented')));
   }
 
-  Future<void> _onDumpSettings() async {
-    try {
-      final result = await CameraControl.dumpActiveCameraSettings();
-      final filePath = result['filePath'] as String? ?? '';
-      final keyCount = (result['keyCount'] as num?)?.toInt() ?? 0;
-      final supportedKeyCount =
-          (result['supportedKeyCount'] as num?)?.toInt() ?? 0;
-
-      debugPrint('=== Camera settings dumped ===');
-      debugPrint('Key count: $keyCount (supported: $supportedKeyCount)');
-      debugPrint('Saved file: $filePath');
-
-      if (!mounted) return;
-      final cs = Theme.of(context).colorScheme;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: cs.surfaceContainerHigh.withAlpha(
-            217,
-          ), // 0.85 * 255 ≈ 217
-          elevation: 4,
-          margin: const EdgeInsets.only(left: 128, right: 128, bottom: 60),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: cs.outlineVariant.withAlpha(80)),
-          ),
-          content: Row(
-            children: [
-              Icon(Icons.save_as_outlined, color: cs.primary, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Settings Dumped Successfully',
-                      style: TextStyle(
-                        color: cs.onSurface,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Captured $supportedKeyCount keys to ${filePath.split("/").last}',
-                      style: TextStyle(
-                        color: cs.onSurfaceVariant,
-                        fontSize: 11,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          duration: const Duration(seconds: 4),
-          action: SnackBarAction(
-            label: 'DISMISS',
-            textColor: cs.primary,
-            onPressed: () {},
-          ),
-        ),
-      );
-    } catch (e) {
-      debugPrint('Dump settings failed: $e');
-      if (!mounted) return;
-      _showError('Dump settings failed: $e');
-    }
-  }
-
   // ── Build ─────────────────────────────────────────────────────────
 
   @override
@@ -756,7 +683,6 @@ class _CameraScreenState extends State<CameraScreen> {
                               onToggleCanvas: () =>
                                   setState(() => _showCanvas = !_showCanvas),
                               onToggleSettings: _toggleSettingsDrawer,
-                              onDumpSettings: _onDumpSettings,
                               onReset: _onReset,
                               onExport: _onExport,
                               activeSetting: _activeSetting,

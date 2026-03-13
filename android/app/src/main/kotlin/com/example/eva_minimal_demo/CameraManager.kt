@@ -97,6 +97,9 @@ class CameraManager(
     // Focus distance captured from live AF results
     @Volatile private var capturedFocusDistance: Float? = null
 
+    // Capture results (latest full telemetry)
+    @Volatile private var latestCaptureResult: TotalCaptureResult? = null
+
     // WB lock: captured from live AWB TotalCaptureResults
     @Volatile private var capturedColorTransform: ColorSpaceTransform? = null
 
@@ -277,6 +280,9 @@ class CameraManager(
                                                 )
                                             }
                                     }
+
+                                    // Store latest capture result for diagnostic dumps
+                                    latestCaptureResult = result
                                 }
                             },
                         )
@@ -763,36 +769,10 @@ class CameraManager(
      * Dumps all available CameraCharacteristics keys and active camera properties for
      * the currently bound CameraX camera instance.
      */
-    @OptIn(ExperimentalCamera2Interop::class)
     fun dumpActiveCameraSettings(callback: (Map<String, Any>?, Exception?) -> Unit) {
         val cam = camera ?: return callback(null, IllegalStateException("Camera not ready"))
 
-        try {
-            val cam2Info = Camera2CameraInfo.from(cam.cameraInfo)
-            val dump = buildCameraSettingsDump(cam, cam2Info)
-
-            val outDir = context.getExternalFilesDir(null) ?: context.filesDir
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val outFile = File(outDir, "camera_settings_dump_$timestamp.txt")
-            outFile.writeText(dump.content)
-
-            Log.i(TAG, "=== Camera settings dump begin ===")
-            dump.content.lineSequence().forEach { Log.i(TAG, it) }
-            Log.i(TAG, "Saved camera settings dump to: ${outFile.absolutePath}")
-            Log.i(TAG, "=== Camera settings dump end ===")
-
-            callback(
-                mapOf(
-                    "filePath" to outFile.absolutePath,
-                    "keyCount" to dump.keyCount,
-                    "supportedKeyCount" to dump.supportedKeyCount,
-                ),
-                null,
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to dump active camera settings", e)
-            callback(null, e)
-        }
+        CameraSettingsDumper.dump(context, cam, latestCaptureResult, callback)
     }
 
     // ── Resolution info ─────────────────────────────────────────────────
@@ -954,220 +934,6 @@ class CameraManager(
         Log.i(TAG, "Exposure range: $exposureRange → using ${storedExposureTimeNs}ns")
         Log.i(TAG, "Sensitivity range: $sensitivityRange → using ISO $storedSensitivityIso")
     }
-
-    private data class CameraSettingsDump(
-        val content: String,
-        val keyCount: Int,
-        val supportedKeyCount: Int,
-    )
-
-    @OptIn(ExperimentalCamera2Interop::class)
-    @Suppress("UNCHECKED_CAST")
-    private fun buildCameraSettingsDump(
-        cam: Camera,
-        cam2Info: Camera2CameraInfo,
-    ): CameraSettingsDump {
-        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
-        val sb = StringBuilder()
-        val cameraId = runCatching { cam2Info.cameraId }.getOrElse { "<unknown>" }
-
-        sb.appendLine("# CameraX + Camera2 Settings Dump")
-        sb.appendLine("# Generated: $timestamp")
-        sb.appendLine("# Device: ${Build.MANUFACTURER} ${Build.MODEL} (API ${Build.VERSION.SDK_INT})")
-        sb.appendLine("# Active Camera ID: $cameraId")
-
-        section(sb, "ACTIVE CAMERAX CAMERA PROPERTIES")
-        sb.appendLine("AF enabled (app state)                                  : $afEnabled")
-        sb.appendLine("AE enabled (app state)                                  : $aeEnabled")
-        sb.appendLine("WB locked (app state)                                   : $wbLocked")
-        sb.appendLine("Stored ISO (app state)                                  : $storedSensitivityIso")
-        sb.appendLine("Stored Exposure ns (app state)                          : $storedExposureTimeNs")
-        sb.appendLine("Captured focus distance                                 : ${capturedFocusDistance ?: "<null>"}")
-        sb.appendLine("Has flash unit                                          : ${cam.cameraInfo.hasFlashUnit()}")
-        sb.appendLine("Torch state                                             : ${cam.cameraInfo.torchState.value}")
-
-        val zoomState = cam.cameraInfo.zoomState.value
-        sb.appendLine(
-            "Zoom ratio (current/min/max)                            : ${zoomState?.zoomRatio} / ${zoomState?.minZoomRatio} / ${zoomState?.maxZoomRatio}",
-        )
-
-        val exposureState = cam.cameraInfo.exposureState
-        sb.appendLine("Exposure compensation index (current)                   : ${exposureState.exposureCompensationIndex}")
-        sb.appendLine(
-            "Exposure compensation range                             : [${exposureState.exposureCompensationRange.lower}, ${exposureState.exposureCompensationRange.upper}]",
-        )
-        sb.appendLine("Exposure compensation step                              : ${exposureState.exposureCompensationStep}")
-
-        section(sb, "ALL CAMERA2 CHARACTERISTICS KEYS (via Camera2CameraInfo)")
-
-        val keyFields =
-            CameraCharacteristics::class.java.fields
-                .filter {
-                    Modifier.isStatic(it.modifiers) &&
-                        CameraCharacteristics.Key::class.java.isAssignableFrom(it.type)
-                }.sortedBy { it.name }
-
-        var keyCount = 0
-        var supportedKeyCount = 0
-
-        for (field in keyFields) {
-            val key = runCatching { field.get(null) as? CameraCharacteristics.Key<Any> }.getOrNull()
-            if (key == null) continue
-
-            keyCount += 1
-            val value = runCatching { cam2Info.getCameraCharacteristic(key) }.getOrNull()
-            if (value != null) supportedKeyCount += 1
-
-            sb.append(field.name.padEnd(60))
-            sb.append(": ")
-            sb.appendLine(formatCharacteristicValue(value))
-        }
-
-        section(sb, "SUMMARY")
-        sb.appendLine("Total CameraCharacteristics keys reflected              : $keyCount")
-        sb.appendLine("Supported/non-null keys on active camera                : $supportedKeyCount")
-        sb.appendLine()
-        sb.appendLine("# --- END OF DUMP ---")
-
-        return CameraSettingsDump(
-            content = sb.toString(),
-            keyCount = keyCount,
-            supportedKeyCount = supportedKeyCount,
-        )
-    }
-
-    private fun section(
-        sb: StringBuilder,
-        title: String,
-    ) {
-        sb.appendLine()
-        sb.appendLine("# ── $title " + "─".repeat(maxOf(0, 60 - title.length)))
-    }
-
-    private fun formatCharacteristicValue(value: Any?): String =
-        when (value) {
-            null -> {
-                "<not supported>"
-            }
-
-            is FloatArray -> {
-                value.joinToString(prefix = "[", postfix = "]") { "%.6f".format(it) }
-            }
-
-            is IntArray -> {
-                value.joinToString(prefix = "[", postfix = "]")
-            }
-
-            is LongArray -> {
-                value.joinToString(prefix = "[", postfix = "]")
-            }
-
-            is DoubleArray -> {
-                value.joinToString(prefix = "[", postfix = "]") { "%.6f".format(it) }
-            }
-
-            is ByteArray -> {
-                value.joinToString(prefix = "[", postfix = "]") { it.toInt().and(0xFF).toString() }
-            }
-
-            is Array<*> -> {
-                value.joinToString(prefix = "[", postfix = "]") { formatCharacteristicValue(it) }
-            }
-
-            is android.hardware.camera2.params.StreamConfigurationMap -> {
-                formatStreamConfigurationMap(value)
-            }
-
-            else -> {
-                formatSingleCharacteristicValue(value)
-            }
-        }
-
-    private fun formatSingleCharacteristicValue(v: Any?): String =
-        when (v) {
-            null -> {
-                "null"
-            }
-
-            is Range<*> -> {
-                "[${v.lower}, ${v.upper}]"
-            }
-
-            is Size -> {
-                "${v.width}x${v.height}"
-            }
-
-            is android.util.SizeF -> {
-                "${v.width}x${v.height}"
-            }
-
-            is android.util.Rational -> {
-                "${v.numerator}/${v.denominator}"
-            }
-
-            is android.graphics.Rect -> {
-                "(${v.left},${v.top})-(${v.right},${v.bottom})"
-            }
-
-            is android.hardware.camera2.params.BlackLevelPattern -> {
-                "[${v.getOffsetForIndex(0,0)}, ${v.getOffsetForIndex(1,0)}, ${v.getOffsetForIndex(0,1)}, ${v.getOffsetForIndex(1,1)}]"
-            }
-
-            is ColorSpaceTransform -> {
-                buildString {
-                    append("[")
-                    for (row in 0..2) {
-                        for (col in 0..2) {
-                            append(
-                                "${v.getElement(col, row).numerator}/${v.getElement(col, row).denominator}",
-                            )
-                            if (!(row == 2 && col == 2)) append(", ")
-                        }
-                    }
-                    append("]")
-                }
-            }
-
-            else -> {
-                v.toString()
-            }
-        }
-
-    private fun formatStreamConfigurationMap(map: android.hardware.camera2.params.StreamConfigurationMap): String {
-        val outputs =
-            map.outputFormats.joinToString(separator = "; ") { format ->
-                val sizes =
-                    map
-                        .getOutputSizes(format)
-                        ?.joinToString(prefix = "[", postfix = "]") { "${it.width}x${it.height}" }
-                        ?: "[]"
-                "${imageFormatName(format)}=$sizes"
-            }
-
-        val inputs =
-            map.inputFormats.joinToString(separator = "; ") { format ->
-                val sizes =
-                    map
-                        .getInputSizes(format)
-                        ?.joinToString(prefix = "[", postfix = "]") { "${it.width}x${it.height}" }
-                        ?: "[]"
-                "${imageFormatName(format)}=$sizes"
-            }
-
-        return "outputs{$outputs} inputs{$inputs}"
-    }
-
-    private fun imageFormatName(format: Int): String =
-        when (format) {
-            ImageFormat.YUV_420_888 -> "YUV_420_888"
-            ImageFormat.JPEG -> "JPEG"
-            ImageFormat.RAW_SENSOR -> "RAW_SENSOR"
-            ImageFormat.PRIVATE -> "PRIVATE"
-            ImageFormat.DEPTH16 -> "DEPTH16"
-            ImageFormat.DEPTH_JPEG -> "DEPTH_JPEG"
-            ImageFormat.HEIC -> "HEIC"
-            else -> "format_$format"
-        }
 
     /** Write EXIF orientation tag to saved JPEG. */
     private fun writeExifRotation(

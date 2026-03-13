@@ -21,7 +21,6 @@ class InteractiveBottomBar extends StatelessWidget {
   final VoidCallback onToggleScan;
   final VoidCallback onToggleCanvas;
   final VoidCallback onToggleSettings;
-  final VoidCallback onDumpSettings;
   final VoidCallback onReset;
   final VoidCallback onExport;
   final ValueChanged<CameraSettingType?> onSettingChipTap;
@@ -38,7 +37,6 @@ class InteractiveBottomBar extends StatelessWidget {
     required this.onToggleScan,
     required this.onToggleCanvas,
     required this.onToggleSettings,
-    required this.onDumpSettings,
     required this.onReset,
     required this.onExport,
     required this.onSettingChipTap,
@@ -87,7 +85,6 @@ class InteractiveBottomBar extends StatelessWidget {
                     values: values,
                     callbacks: callbacks,
                     onToggleSettings: onToggleSettings,
-                    onDumpSettings: onDumpSettings,
                     onSettingChipTap: onSettingChipTap,
                   ),
                 ),
