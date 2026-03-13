@@ -169,9 +169,6 @@ All methods are static on `CameraControl`. Returns are `Future<void>` unless not
 | Method                     | Returns     | Description                  |
 | -------------------------- | ----------- | ---------------------------- |
 | `setAeEnabled(bool)`       | —           | Enable/disable auto-exposure |
-| `getExposureOffsetRange()` | `List<int>` | AE compensation index range  |
-| `getExposureOffsetStep()`  | `double`    | EV per index step            |
-| `setExposureOffset(int)`   | —           | Set AE compensation index    |
 | `setExposureTimeNs(int)`   | —           | Set manual shutter speed     |
 | `setIso(int)`              | —           | Set manual ISO               |
 

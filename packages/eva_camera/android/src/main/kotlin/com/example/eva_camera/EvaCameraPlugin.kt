@@ -224,25 +224,6 @@ class EvaCameraPlugin :
                     }
                 }
 
-                "getExposureOffsetStep" -> {
-                    result.success(manager.getExposureOffsetStep())
-                }
-
-                "getExposureOffsetRange" -> {
-                    result.success(manager.getExposureOffsetRange())
-                }
-
-                "setExposureOffset" -> {
-                    val index = call.argument<Int>("index") ?: 0
-                    manager.setExposureOffset(index) { error ->
-                        if (error != null) {
-                            result.error("EXPOSURE_OFFSET_FAILED", error.message, null)
-                        } else {
-                            result.success(null)
-                        }
-                    }
-                }
-
                 "getCurrentFocusDistance" -> {
                     result.success(manager.getCurrentFocusDistance().toDouble())
                 }

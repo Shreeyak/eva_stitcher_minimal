@@ -23,7 +23,7 @@ Flutter / Dart  ←→  Kotlin (CameraX + Camera2)  ←→  C++ / OpenCV (Phase 
 Three fixed channels defined in `MainActivity.kt`:
 
 - **`PlatformView "camerax-preview"`** — embeds native `PreviewView` directly into Flutter widget tree via `CameraPreviewFactory`
-- **`MethodChannel "com.example.eva/control"`** — camera commands: `startCamera`, `stopCamera`, `captureImage`, `setWbLocked`, `setAfEnabled`, `setAeEnabled`, `setExposureOffset`, `setFocusDistance`, `setZoomRatio`, `setIso`, `setExposureTimeNs`, `setCaptureIntent`, `setCaptureFormat`, etc.
+- **`MethodChannel "com.example.eva/control"`** — camera commands: `startCamera`, `stopCamera`, `captureImage`, `setWbLocked`, `setAfEnabled`, `setAeEnabled`, `setFocusDistance`, `setZoomRatio`, `setIso`, `setExposureTimeNs`, `setCaptureIntent`, `setCaptureFormat`, etc.
 - **`EventChannel "com.example.eva/events"`** — pushes `{frameCount, fps}` map to Dart every 500 ms
 
 ## Camera Invariants

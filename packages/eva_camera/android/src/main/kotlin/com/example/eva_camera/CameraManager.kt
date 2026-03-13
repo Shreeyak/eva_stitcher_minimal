@@ -580,37 +580,6 @@ class CameraManager(
         }
     }
 
-    fun getExposureOffsetStep(): Double {
-        val cam = camera ?: return 0.0
-        return cam.cameraInfo.exposureState.exposureCompensationStep
-            .toDouble()
-    }
-
-    fun getExposureOffsetRange(): List<Int> {
-        val cam = camera ?: return listOf(0, 0)
-        val range = cam.cameraInfo.exposureState.exposureCompensationRange
-        return listOf(range.lower, range.upper)
-    }
-
-    fun setExposureOffset(
-        index: Int,
-        callback: (Exception?) -> Unit,
-    ) {
-        val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
-        val future = cam.cameraControl.setExposureCompensationIndex(index)
-        future.addListener(
-            {
-                try {
-                    future.get()
-                    callback(null)
-                } catch (e: Exception) {
-                    callback(e)
-                }
-            },
-            ContextCompat.getMainExecutor(context),
-        )
-    }
-
     // ── Manual sensor exposure / ISO ─────────────────────────────────
 
     /** Set the sensor exposure time (nanoseconds). */

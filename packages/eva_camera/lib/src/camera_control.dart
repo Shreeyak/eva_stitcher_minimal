@@ -92,19 +92,6 @@ class CameraControl {
   static Future<void> setAeEnabled(bool enabled) =>
       _method.invokeMethod('setAeEnabled', {'enabled': enabled});
 
-  static Future<double> getExposureOffsetStep() async {
-    final result = await _method.invokeMethod<double>('getExposureOffsetStep');
-    return result ?? 0.0;
-  }
-
-  static Future<List<int>> getExposureOffsetRange() async {
-    final result = await _method.invokeMethod<List>('getExposureOffsetRange');
-    return result?.map((e) => (e as num).toInt()).toList() ?? [0, 0];
-  }
-
-  static Future<void> setExposureOffset(int index) =>
-      _method.invokeMethod('setExposureOffset', {'index': index});
-
   // ── Auto focus ────────────────────────────────────────────────────
 
   static Future<void> setAfEnabled(bool enabled) =>
