@@ -20,17 +20,9 @@ class CameraControl {
 
   static Future<void> stopCamera() => _method.invokeMethod('stopCamera');
 
-  static Future<String> saveFrame() async {
-    final path = await _method.invokeMethod<String>('saveFrame');
-    return path ?? '';
-  }
-
-  /// Capture a full-resolution image buffer from ImageCapture.
-  /// Returns format-dependent data: YUV planes or JPEG bytes.
-  static Future<Map<String, dynamic>> captureImage() async {
-    final result = await _method.invokeMethod<Map>('captureImage');
-    return Map<String, dynamic>.from(result ?? {});
-  }
+  /// Trigger a full-resolution still capture. The frame is delivered directly to the
+  /// native StillCaptureProcessor — no image data crosses the MethodChannel.
+  static Future<void> captureImage() => _method.invokeMethod('captureImage');
 
   /// Switch ImageCapture output format (triggers camera rebind).
   /// Returns updated resolution info.
@@ -64,6 +56,24 @@ class CameraControl {
     final locked = await _method.invokeMethod<bool>('isWbLocked');
     return locked ?? false;
   }
+
+  // ── Auto exposure ─────────────────────────────────────────────────
+
+  static Future<void> setAeEnabled(bool enabled) =>
+      _method.invokeMethod('setAeEnabled', {'enabled': enabled});
+
+  static Future<double> getExposureOffsetStep() async {
+    final result = await _method.invokeMethod<double>('getExposureOffsetStep');
+    return result ?? 0.0;
+  }
+
+  static Future<List<int>> getExposureOffsetRange() async {
+    final result = await _method.invokeMethod<List>('getExposureOffsetRange');
+    return result?.map((e) => (e as num).toInt()).toList() ?? [0, 0];
+  }
+
+  static Future<void> setExposureOffset(int index) =>
+      _method.invokeMethod('setExposureOffset', {'index': index});
 
   // ── Auto focus ────────────────────────────────────────────────────
 

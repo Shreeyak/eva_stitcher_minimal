@@ -25,12 +25,20 @@ class EvaCameraPlugin :
         private const val CAMERA_VIEW_TYPE = "camerax-preview"
         private const val CAMERA_PERMISSION_CODE = 1001
 
-        private var frameProcessor: FrameProcessor? = null
+        @Volatile private var frameProcessor: FrameProcessor? = null
+
+        @Volatile private var stillCaptureProcessor: StillCaptureProcessor? = null
 
         /** Register a [FrameProcessor] to receive every ImageAnalysis frame. */
         @JvmStatic
         fun setFrameProcessor(processor: FrameProcessor?) {
             frameProcessor = processor
+        }
+
+        /** Register a [StillCaptureProcessor] to receive full-resolution still captures. */
+        @JvmStatic
+        fun setStillCaptureProcessor(processor: StillCaptureProcessor?) {
+            stillCaptureProcessor = processor
         }
     }
 
@@ -84,6 +92,7 @@ class EvaCameraPlugin :
         val manager =
             CameraManager(activity, lifecycleOwner).also {
                 it.frameProcessor = frameProcessor
+                it.stillCaptureProcessor = stillCaptureProcessor
             }
         cameraManager = manager
 
@@ -160,16 +169,6 @@ class EvaCameraPlugin :
                 "stopCamera" -> {
                     manager.stopCamera()
                     result.success(null)
-                }
-
-                "saveFrame" -> {
-                    manager.saveFrame { path, error ->
-                        if (error != null) {
-                            result.error("SAVE_FAILED", error.message, null)
-                        } else {
-                            result.success(path)
-                        }
-                    }
                 }
 
                 "dumpActiveCameraSettings" -> {
@@ -335,11 +334,11 @@ class EvaCameraPlugin :
                 }
 
                 "captureImage" -> {
-                    manager.captureImage { data, error ->
+                    manager.captureImage { error ->
                         if (error != null) {
                             result.error("CAPTURE_IMAGE_FAILED", error.message, null)
                         } else {
-                            result.success(data)
+                            result.success(null)
                         }
                     }
                 }

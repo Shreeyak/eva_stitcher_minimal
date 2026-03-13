@@ -22,8 +22,12 @@ class MainActivity : FlutterActivity() {
                     uvRowStride: Int,
                     uvPixelStride: Int,
                     captureResult: TotalCaptureResult?,
-                ): Float =
-                    NativeStitcher.processFrame(
+                ): Float {
+                    // TODO(Phase 2): Forward captureResult to NativeStitcher so the stitching
+                    //  pipeline can read per-frame sensor metadata (exposure, ISO, focus distance)
+                    //  for exposure-compensated blending. NativeStitcher.processFrame() must first
+                    //  be extended to accept a TotalCaptureResult parameter.
+                    return NativeStitcher.processFrame(
                         width,
                         height,
                         yPlane,
@@ -33,6 +37,7 @@ class MainActivity : FlutterActivity() {
                         uvRowStride,
                         uvPixelStride,
                     )
+                }
             },
         )
     }

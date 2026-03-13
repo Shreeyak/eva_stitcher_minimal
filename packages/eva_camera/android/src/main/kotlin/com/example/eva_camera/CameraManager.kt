@@ -1,6 +1,5 @@
 package com.example.eva_camera
 
-import android.content.ContentValues
 import android.content.Context
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -10,10 +9,8 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.RggbChannelVector
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.MediaStore
 import android.util.Log
 import android.util.Range
 import android.util.Size
@@ -36,13 +33,8 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.plugin.common.EventChannel
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -68,6 +60,9 @@ class CameraManager(
 
     /** Optional frame processor — set by the host app via [EvaCameraPlugin.setFrameProcessor]. */
     var frameProcessor: FrameProcessor? = null
+
+    /** Optional still-capture processor — set via [EvaCameraPlugin.setStillCaptureProcessor]. */
+    var stillCaptureProcessor: StillCaptureProcessor? = null
 
     // ── Camera state ────────────────────────────────────────────────────
     private var camera: Camera? = null
@@ -324,6 +319,7 @@ class CameraManager(
 
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
+            stopFpsTimer()
             provider.unbindAll()
             val cam =
                 provider.bindToLifecycle(
@@ -717,6 +713,9 @@ class CameraManager(
         callback: (Exception?) -> Unit,
     ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
+        if (intentName != "preview" && intentName != "stillCapture") {
+            return callback(IllegalArgumentException("Unknown capture intent: $intentName"))
+        }
         val prev = captureIntentPreview
         captureIntentPreview = (intentName == "preview")
         applyAllCaptureOptions(cam) { e ->
@@ -744,156 +743,49 @@ class CameraManager(
         val pv = previewView ?: return callback(null, IllegalStateException("PreviewView not ready"))
         val provider = cameraProvider ?: return callback(null, IllegalStateException("Camera not ready"))
 
+        val prev = captureFormatYuv
         captureFormatYuv = (formatName == "yuv")
         Log.i(TAG, "setCaptureFormat → ${if (captureFormatYuv) "YUV_420_888" else "JPEG"}, rebinding…")
-        rebindUseCases(pv, provider, callback)
-    }
-
-    // ── Save frame ──────────────────────────────────────────────────────
-
-    fun saveFrame(callback: (String?, Exception?) -> Unit) {
-        if (captureFormatYuv) {
-            return callback(
-                null,
-                IllegalStateException(
-                    "saveFrame requires JPEG format — call setCaptureFormat(\"jpeg\") first",
-                ),
-            )
+        rebindUseCases(pv, provider) { info, error ->
+            if (error != null) captureFormatYuv = prev
+            callback(info, error)
         }
-        val capture =
-            imageCapture ?: return callback(null, IllegalStateException("Camera not ready"))
-        val executor =
-            cameraExecutor
-                ?: return callback(
-                    null,
-                    IllegalStateException("Camera executor not available"),
-                )
-
-        capture.takePicture(
-            executor,
-            object : ImageCapture.OnImageCapturedCallback() {
-                override fun onCaptureSuccess(imageProxy: ImageProxy) {
-                    val w = imageProxy.width
-                    val h = imageProxy.height
-                    Log.i(TAG, "Captured image: ${w}x$h")
-
-                    val buffer = imageProxy.planes[0].buffer
-                    val bytes = ByteArray(buffer.remaining())
-                    buffer.get(bytes)
-                    val rotation = imageProxy.imageInfo.rotationDegrees
-                    imageProxy.close()
-
-                    val name =
-                        SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US)
-                            .format(System.currentTimeMillis())
-                    val contentValues =
-                        ContentValues().apply {
-                            put(MediaStore.MediaColumns.DISPLAY_NAME, "EVA_$name")
-                            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                put(
-                                    MediaStore.Images.Media.RELATIVE_PATH,
-                                    "Pictures/EvaWSI",
-                                )
-                                put(MediaStore.Images.Media.IS_PENDING, 1)
-                            }
-                        }
-
-                    try {
-                        val uri =
-                            context.contentResolver.insert(
-                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                contentValues,
-                            )
-                                ?: throw Exception("MediaStore insert returned null")
-
-                        context.contentResolver.openOutputStream(uri)?.use { os ->
-                            os.write(bytes)
-                            os.flush()
-                        }
-                        writeExifRotation(uri, rotation)
-
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            val update =
-                                ContentValues().apply {
-                                    put(MediaStore.Images.Media.IS_PENDING, 0)
-                                }
-                            context.contentResolver.update(uri, update, null, null)
-                        }
-
-                        val path = "Pictures/EvaWSI/EVA_$name.jpg"
-                        Log.i(TAG, "Saved ${w}x$h to $path")
-                        mainHandler.post { callback(path, null) }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Save failed", e)
-                        mainHandler.post { callback(null, e) }
-                    }
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    Log.e(TAG, "Capture failed", exception)
-                    mainHandler.post { callback(null, exception) }
-                }
-            },
-        )
     }
 
-    // ── Capture image buffer ──────────────────────────────────────────────
+    // ── Capture image ────────────────────────────────────────────────────
 
     /**
-     * Capture a full-resolution image from ImageCapture.
-     * Returns YUV planes or JPEG bytes depending on the current [captureFormatYuv] setting.
+     * Trigger a full-resolution still capture. The [ImageProxy] is delivered directly to
+     * [stillCaptureProcessor] on the camera executor thread — no pixel data crosses the
+     * MethodChannel. The processor is responsible for calling [ImageProxy.close].
+     *
+     * @param callback Invoked on the main thread when capture completes or fails.
      */
-    fun captureImage(callback: (Map<String, Any>?, Exception?) -> Unit) {
+    fun captureImage(callback: (Exception?) -> Unit) {
         val capture =
-            imageCapture ?: return callback(null, IllegalStateException("Camera not ready"))
+            imageCapture ?: return callback(IllegalStateException("Camera not ready"))
         val executor =
             cameraExecutor
-                ?: return callback(null, IllegalStateException("Camera executor not available"))
+                ?: return callback(IllegalStateException("Camera executor not available"))
 
         capture.takePicture(
             executor,
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(imageProxy: ImageProxy) {
-                    val w = imageProxy.width
-                    val h = imageProxy.height
-                    val rotation = imageProxy.imageInfo.rotationDegrees
-
-                    val result =
-                        mutableMapOf<String, Any>(
-                            "width" to w,
-                            "height" to h,
-                            "rotation" to rotation,
-                        )
-
-                    if (captureFormatYuv) {
-                        result["format"] = "yuv"
-                        val yPlane = imageProxy.planes[0]
-                        val uPlane = imageProxy.planes[1]
-                        val vPlane = imageProxy.planes[2]
-                        result["yPlane"] = ByteArray(yPlane.buffer.remaining()).also { yPlane.buffer.get(it) }
-                        result["uPlane"] = ByteArray(uPlane.buffer.remaining()).also { uPlane.buffer.get(it) }
-                        result["vPlane"] = ByteArray(vPlane.buffer.remaining()).also { vPlane.buffer.get(it) }
-                        result["yRowStride"] = yPlane.rowStride
-                        result["uvRowStride"] = uPlane.rowStride
-                        result["uvPixelStride"] = uPlane.pixelStride
-                        Log.i(TAG, "captureImage(YUV): ${w}x$h")
+                    val processor = stillCaptureProcessor
+                    if (processor != null) {
+                        processor.onStillCapture(imageProxy, latestCaptureResult)
+                        // imageProxy.close() is the processor's responsibility
                     } else {
-                        result["format"] = "jpeg"
-                        val buffer = imageProxy.planes[0].buffer
-                        val bytes = ByteArray(buffer.remaining())
-                        buffer.get(bytes)
-                        result["bytes"] = bytes
-                        Log.i(TAG, "captureImage(JPEG): ${w}x$h, ${bytes.size} bytes")
+                        imageProxy.close()
+                        Log.w(TAG, "captureImage: no StillCaptureProcessor registered")
                     }
-
-                    imageProxy.close()
-                    mainHandler.post { callback(result, null) }
+                    mainHandler.post { callback(null) }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
                     Log.e(TAG, "captureImage failed", exception)
-                    mainHandler.post { callback(null, exception) }
+                    mainHandler.post { callback(exception) }
                 }
             },
         )
@@ -1086,29 +978,6 @@ class CameraManager(
 
         Log.i(TAG, "Exposure range: $exposureRange → using ${storedExposureTimeNs}ns")
         Log.i(TAG, "Sensitivity range: $sensitivityRange → using ISO $storedSensitivityIso")
-    }
-
-    /** Write EXIF orientation tag to saved JPEG. */
-    private fun writeExifRotation(
-        uri: android.net.Uri,
-        rotationDegrees: Int,
-    ) {
-        val exifOrientation =
-            when (rotationDegrees) {
-                90 -> ExifInterface.ORIENTATION_ROTATE_90
-                180 -> ExifInterface.ORIENTATION_ROTATE_180
-                270 -> ExifInterface.ORIENTATION_ROTATE_270
-                else -> ExifInterface.ORIENTATION_NORMAL
-            }
-        try {
-            context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
-                val exif = ExifInterface(pfd.fileDescriptor)
-                exif.setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
-                exif.saveAttributes()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not write EXIF orientation", e)
-        }
     }
 
     /** Push a typed event to Dart on the main thread. */
