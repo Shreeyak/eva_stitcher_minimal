@@ -1,4 +1,4 @@
-package com.example.eva_minimal_demo
+package com.example.eva_camera
 
 import android.content.ContentValues
 import android.content.Context
@@ -49,8 +49,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Manages all CameraX operations: preview, capture, analysis, and Camera2 interop. Analysis frames
- * stay native-side (no streaming to Dart). In phase 2, frames will be passed to C++ via JNI for
- * stitching.
+ * stay native-side (no streaming to Dart). Frames are forwarded to a [FrameProcessor] if one is
+ * registered.
  */
 class CameraManager(
     private val context: Context,
@@ -65,6 +65,9 @@ class CameraManager(
                 intArrayOf(1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1),
             )
     }
+
+    /** Optional frame processor — set by the host app via [EvaCameraPlugin.setFrameProcessor]. */
+    var frameProcessor: FrameProcessor? = null
 
     // ── Camera state ────────────────────────────────────────────────────
     private var camera: Camera? = null
@@ -125,7 +128,7 @@ class CameraManager(
     private var fpsTimer: Runnable? = null
 
     // ═══════════════════════════════════════════════════════════════════
-    // Public API — called from MainActivity via MethodChannel
+    // Public API
     // ═══════════════════════════════════════════════════════════════════
 
     /** Set the PreviewView whose surface provider will receive the camera feed. */
@@ -386,15 +389,12 @@ class CameraManager(
 
     // ── Frame processing (native-side only) ─────────────────────────────
 
-    /**
-     * Process an analysis frame. Currently just counts frames for FPS tracking. In phase 2, the YUV
-     * ImageProxy will be passed to C++ via JNI.
-     */
     private fun processFrame(imageProxy: ImageProxy) {
         try {
             frameCount++
 
-            // ── YUV → JNI → C++ OpenCV ────────────────────────────────────
+            val processor = frameProcessor ?: return
+
             val yPlane = imageProxy.planes[0]
             val uPlane = imageProxy.planes[1]
             val vPlane = imageProxy.planes[2]
@@ -407,7 +407,7 @@ class CameraManager(
             val uBytes = ByteArray(uBuf.remaining()).also { uBuf.get(it) }
             val vBytes = ByteArray(vBuf.remaining()).also { vBuf.get(it) }
 
-            NativeStitcher.processFrame(
+            processor.processFrame(
                 width = imageProxy.width,
                 height = imageProxy.height,
                 yPlane = yBytes,

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
-import '../camera/camera_state.dart';
+import 'package:eva_camera/eva_camera.dart';
 
 /// A custom vertical icon-text button used in the bottom action bars.
 ///

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../camera/camera_state.dart';
+import 'package:eva_camera/eva_camera.dart';
 import 'bottom_bar_buttons.dart';
 import 'camera_settings_bar.dart';
 

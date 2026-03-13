@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-03-14
+
+- Extracted camera stack into reusable Flutter plugin at `packages/eva_camera/` (Dart + Kotlin/CameraX).
+- App's `MainActivity.kt` reduced to minimal FrameProcessor registration; NativeStitcher stays in-app.
+
 ## 2026-03-13 (update 43)
 
 - Added `DUMP SETTINGS` button to camera settings bar; tap now triggers an explicit camera settings dump.

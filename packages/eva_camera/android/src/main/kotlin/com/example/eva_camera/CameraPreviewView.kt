@@ -1,4 +1,4 @@
-package com.example.eva_minimal_demo
+package com.example.eva_camera
 
 import android.content.Context
 import android.view.View
@@ -11,18 +11,17 @@ import io.flutter.plugin.platform.PlatformView
  * case.
  */
 class CameraPreviewView(
-        context: Context,
-        private val viewId: Int,
-        creationParams: Map<String, Any>?,
-        private val onViewCreated: (PreviewView) -> Unit,
-        private val onViewDisposed: () -> Unit
+    context: Context,
+    private val viewId: Int,
+    creationParams: Map<String, Any>?,
+    private val onViewCreated: (PreviewView) -> Unit,
+    private val onViewDisposed: () -> Unit,
 ) : PlatformView {
-
     private val previewView: PreviewView =
-            PreviewView(context).apply {
-                implementationMode = PreviewView.ImplementationMode.PERFORMANCE
-                scaleY = -1f
-            }
+        PreviewView(context).apply {
+            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+            scaleY = -1f
+        }
 
     init {
         onViewCreated(previewView)

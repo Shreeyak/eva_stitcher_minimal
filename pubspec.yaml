@@ -28,6 +28,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  eva_camera:
+    path: packages/eva_camera
   material_symbols_icons: ^4.2729.0
   google_fonts: ^6.2.1
   flutter:

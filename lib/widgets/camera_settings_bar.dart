@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:eva_camera/eva_camera.dart';
 import '../camera/camera_settings_dumper.dart';
-import '../camera/camera_state.dart';
 import 'bottom_bar_buttons.dart';
 
 class CameraSettingsBar extends StatelessWidget {

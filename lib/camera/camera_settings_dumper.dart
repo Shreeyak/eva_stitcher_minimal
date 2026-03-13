@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'camera_control.dart';
+import 'package:eva_camera/eva_camera.dart';
 
 /// Service to handle dumping and formatting camera settings to disk.
 class CameraSettingsDumper {

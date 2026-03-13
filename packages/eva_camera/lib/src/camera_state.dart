@@ -1,5 +1,3 @@
-// lib/camera/camera_state.dart
-//
 // Immutable data classes that group camera-related models into coherent objects:
 //
 //   CameraValues  — user-controllable current values (changes on every slider drag)

@@ -6,9 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'theme/material_theme_salmon.dart';
 import 'theme/theme_util.dart';
-import 'camera/camera_control.dart';
-import 'camera/camera_settings_queue.dart';
-import 'camera/camera_state.dart';
+import 'package:eva_camera/eva_camera.dart';
 import 'widgets/bottom_info_bar.dart';
 import 'widgets/interactive_bottom_bar.dart';
 import 'widgets/canvas_view.dart';

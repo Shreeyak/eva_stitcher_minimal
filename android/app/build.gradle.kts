@@ -5,7 +5,6 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-val cameraxVersion = "1.5.3"
 val openCvJniDir = rootProject.file("opencv/sdk/native/jni")
 
 android {
@@ -69,12 +68,4 @@ flutter { source = "../.." }
 
 dependencies {
     implementation(project(":opencv"))
-    implementation("androidx.camera:camera-core:$cameraxVersion")
-    implementation("androidx.camera:camera-camera2:$cameraxVersion")
-    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
-    implementation("androidx.camera:camera-view:$cameraxVersion")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
-    implementation("com.google.guava:guava:33.3.1-android")
 }
