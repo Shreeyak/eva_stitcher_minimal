@@ -1,6 +1,7 @@
 package com.example.eva_camera
 
 import android.hardware.camera2.TotalCaptureResult
+import androidx.camera.core.ImageProxy
 
 /**
  * Callback interface for processing YUV_420_888 analysis frames from CameraX.
@@ -11,7 +12,10 @@ import android.hardware.camera2.TotalCaptureResult
  */
 interface FrameProcessor {
     /**
-     * Process a single YUV_420_888 frame.
+     * Process a single ImageAnalysis frame.
+     *
+     * [imageProxy] is valid only during this callback. The plugin closes it in
+     * [CameraManager.processFrame] after this method returns.
      *
      * @param captureResult The latest TotalCaptureResult from the capture pipeline,
      *        or null if not yet available. Useful for reading per-frame sensor metadata
@@ -21,14 +25,7 @@ interface FrameProcessor {
      *         future expansion.
      */
     fun processFrame(
-        width: Int,
-        height: Int,
-        yPlane: ByteArray,
-        uPlane: ByteArray,
-        vPlane: ByteArray,
-        yRowStride: Int,
-        uvRowStride: Int,
-        uvPixelStride: Int,
+        imageProxy: ImageProxy,
         captureResult: TotalCaptureResult? = null,
     ): Float
 }

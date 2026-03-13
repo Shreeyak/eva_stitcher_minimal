@@ -17,29 +17,34 @@ class MainActivity : FlutterActivity() {
         EvaCameraPlugin.setFrameProcessor(
             object : FrameProcessor {
                 override fun processFrame(
-                    width: Int,
-                    height: Int,
-                    yPlane: ByteArray,
-                    uPlane: ByteArray,
-                    vPlane: ByteArray,
-                    yRowStride: Int,
-                    uvRowStride: Int,
-                    uvPixelStride: Int,
+                    imageProxy: ImageProxy,
                     captureResult: TotalCaptureResult?,
                 ): Float {
+                    val yPlane = imageProxy.planes[0]
+                    val uPlane = imageProxy.planes[1]
+                    val vPlane = imageProxy.planes[2]
+
+                    val yBuffer = yPlane.buffer
+                    val uBuffer = uPlane.buffer
+                    val vBuffer = vPlane.buffer
+
+                    val yBytes = ByteArray(yBuffer.remaining()).also { yBuffer.get(it) }
+                    val uBytes = ByteArray(uBuffer.remaining()).also { uBuffer.get(it) }
+                    val vBytes = ByteArray(vBuffer.remaining()).also { vBuffer.get(it) }
+
                     // TODO(Phase 2): Forward captureResult to NativeStitcher so the stitching
                     //  pipeline can read per-frame sensor metadata (exposure, ISO, focus distance)
                     //  for exposure-compensated blending. NativeStitcher.processFrame() must first
                     //  be extended to accept a TotalCaptureResult parameter.
                     return NativeStitcher.processFrame(
-                        width,
-                        height,
-                        yPlane,
-                        uPlane,
-                        vPlane,
-                        yRowStride,
-                        uvRowStride,
-                        uvPixelStride,
+                        imageProxy.width,
+                        imageProxy.height,
+                        yBytes,
+                        uBytes,
+                        vBytes,
+                        yPlane.rowStride,
+                        uPlane.rowStride,
+                        uPlane.pixelStride,
                     )
                 }
             },

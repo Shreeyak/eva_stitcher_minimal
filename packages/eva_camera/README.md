@@ -16,8 +16,8 @@ Flutter (Dart)          Kotlin                       C++ / JNI
 CameraControl  ──────►  EvaCameraPlugin              NativeStitcher
   MethodChannel          └─ CameraManager
   EventChannel               ├─ Preview (PreviewView PlatformView)
-                             ├─ ImageCapture (3120×4208 YUV or JPEG)
-                             └─ ImageAnalysis (960×1280 YUV, ~30 fps)
+                 ├─ ImageCapture (4208×3120 YUV or JPEG)
+                 └─ ImageAnalysis (1280×960 YUV, ~30 fps)
                                     │                       │
                                     ▼                       ▼
                              FrameProcessor      PhotoCapture/StitchFrame processors
@@ -49,16 +49,19 @@ import com.example.eva_camera.StillFrameSaver
 class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        GeneratedPluginRegistrant.registerWith(flutterEngine)
 
         EvaCameraPlugin.setFrameProcessor(object : FrameProcessor {
             override fun processFrame(
-                width: Int, height: Int,
-                yPlane: ByteArray, uPlane: ByteArray, vPlane: ByteArray,
-                yRowStride: Int, uvRowStride: Int, uvPixelStride: Int,
+                imageProxy: ImageProxy,
                 captureResult: TotalCaptureResult?,
             ): Float {
+                // ImageProxy gives full access to planes/strides/metadata.
+                // You can consume buffers directly in this callback for a zero-copy path.
+                val yBuf = imageProxy.planes[0].buffer
+                val uBuf = imageProxy.planes[1].buffer
+                val vBuf = imageProxy.planes[2].buffer
                 // TODO: pass to NativeStitcher via JNI
+                // ⚠ DO NOT call imageProxy.close() — CameraManager handles it in a finally block.
                 return 0f
             }
         })
@@ -116,10 +119,94 @@ final info = await CameraControl.startCamera(
 
 ```dart
 AndroidView(
-  viewType: 'camerax-preview',
+    viewType: CameraControl.previewViewType,
   creationParamsCodec: const StandardMessageCodec(),
 )
 ```
+
+### 4. Full Flutter integration example (preview + lifecycle)
+
+```dart
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:eva_camera/eva_camera.dart';
+
+class CameraPreviewPane extends StatefulWidget {
+    const CameraPreviewPane({super.key});
+
+    @override
+    State<CameraPreviewPane> createState() => _CameraPreviewPaneState();
+}
+
+class _CameraPreviewPaneState extends State<CameraPreviewPane> {
+    bool _permissionDenied = false;
+    String? _error;
+
+    @override
+    void initState() {
+        super.initState();
+        _initCamera();
+    }
+
+    Future<void> _initCamera() async {
+        try {
+            final granted = await CameraControl.requestPermission();
+            if (!mounted) return;
+            if (!granted) {
+                setState(() => _permissionDenied = true);
+                return;
+            }
+
+            await CameraControl.startCamera(
+                captureWidth: 4208,
+                captureHeight: 3120,
+                analysisWidth: 1280,
+                analysisHeight: 960,
+            );
+        } catch (e) {
+            if (!mounted) return;
+            setState(() => _error = e.toString());
+        }
+    }
+
+    @override
+    void dispose() {
+        CameraControl.stopCamera();
+        super.dispose();
+    }
+
+    @override
+    Widget build(BuildContext context) {
+        if (defaultTargetPlatform != TargetPlatform.android || !Platform.isAndroid) {
+            return const Center(child: Text('eva_camera preview is Android-only.'));
+        }
+        if (_permissionDenied) {
+            return const Center(child: Text('Camera permission denied.'));
+        }
+        if (_error != null) {
+            return Center(child: Text('Camera init failed: $_error'));
+        }
+
+        return ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: const AndroidView(
+                viewType: CameraControl.previewViewType,
+                creationParamsCodec: StandardMessageCodec(),
+            ),
+        );
+    }
+}
+```
+
+This widget gives you:
+
+- permission request on mount,
+- camera start once granted,
+- preview embedding via the native PlatformView, and
+- camera stop on dispose to release resources.
 
 ---
 
@@ -155,7 +242,7 @@ MethodChannel round-trip to Dart.
 
 ### `ImageProxy` lifetime
 
-`CameraManager` always calls `imageProxy.close()` in a `finally` block after `onStillCapture`
+`CameraManager` always calls `imageProxy.close()` in a `finally` block after your processor callback
 returns. **Do not call `close()` in your processor.** Complete all buffer access before returning;
 copy any `ByteBuffer` data that must survive beyond the call before returning.
 

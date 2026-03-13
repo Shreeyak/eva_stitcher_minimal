@@ -442,32 +442,7 @@ class CameraManager(
             frameCount++
 
             val processor = frameProcessor ?: return
-
-            val yPlane = imageProxy.planes[0]
-            val uPlane = imageProxy.planes[1]
-            val vPlane = imageProxy.planes[2]
-
-            val yBuf = yPlane.buffer
-            val uBuf = uPlane.buffer
-            val vBuf = vPlane.buffer
-
-            val yBytes = ByteArray(yBuf.remaining()).also { yBuf.get(it) }
-            val uBytes = ByteArray(uBuf.remaining()).also { uBuf.get(it) }
-            val vBytes = ByteArray(vBuf.remaining()).also { vBuf.get(it) }
-
-            val captureResult = latestCaptureResult
-
-            processor.processFrame(
-                width = imageProxy.width,
-                height = imageProxy.height,
-                yPlane = yBytes,
-                uPlane = uBytes,
-                vPlane = vBytes,
-                yRowStride = yPlane.rowStride,
-                uvRowStride = uPlane.rowStride,
-                uvPixelStride = uPlane.pixelStride,
-                captureResult = captureResult,
-            )
+            processor.processFrame(imageProxy = imageProxy, captureResult = latestCaptureResult)
         } finally {
             imageProxy.close()
         }
