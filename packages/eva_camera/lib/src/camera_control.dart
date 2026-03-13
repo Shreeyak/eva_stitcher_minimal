@@ -1,5 +1,7 @@
 import 'package:flutter/services.dart';
 
+import 'camera_state.dart' show CaptureFormat, CaptureIntent;
+
 // ── Platform channel helper ─────────────────────────────────────────────
 
 class CameraControl {
@@ -21,6 +23,24 @@ class CameraControl {
   static Future<String> saveFrame() async {
     final path = await _method.invokeMethod<String>('saveFrame');
     return path ?? '';
+  }
+
+  /// Capture a full-resolution image buffer from ImageCapture.
+  /// Returns format-dependent data: YUV planes or JPEG bytes.
+  static Future<Map<String, dynamic>> captureImage() async {
+    final result = await _method.invokeMethod<Map>('captureImage');
+    return Map<String, dynamic>.from(result ?? {});
+  }
+
+  /// Switch ImageCapture output format (triggers camera rebind).
+  /// Returns updated resolution info.
+  static Future<Map<String, dynamic>> setCaptureFormat(
+    CaptureFormat format,
+  ) async {
+    final result = await _method.invokeMethod<Map>('setCaptureFormat', {
+      'format': format.name,
+    });
+    return Map<String, dynamic>.from(result ?? {});
   }
 
   static Future<Map<String, dynamic>> dumpActiveCameraSettings() async {
@@ -86,9 +106,8 @@ class CameraControl {
 
   // ── Capture intent ────────────────────────────────────────────────
 
-  /// Set capture intent: true = PREVIEW (default), false = STILL_CAPTURE.
-  static Future<void> setCaptureIntent({bool preview = true}) =>
-      _method.invokeMethod('setCaptureIntent', {'preview': preview});
+  static Future<void> setCaptureIntent(CaptureIntent intent) =>
+      _method.invokeMethod('setCaptureIntent', {'intent': intent.name});
 
   // ── Zoom ──────────────────────────────────────────────────────────
 

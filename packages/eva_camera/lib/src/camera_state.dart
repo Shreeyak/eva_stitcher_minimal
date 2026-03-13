@@ -16,6 +16,12 @@ import 'package:flutter/foundation.dart' show VoidCallback;
 /// and auto/manual affordances belongs in the widgets that render the control.
 enum CameraSettingType { iso, shutter, focus, wb, zoom }
 
+/// Camera2 CONTROL_CAPTURE_INTENT values exposed to Dart.
+enum CaptureIntent { preview, stillCapture }
+
+/// ImageCapture output format — switching triggers a camera rebind.
+enum CaptureFormat { yuv, jpeg }
+
 // ─── CameraValues ─────────────────────────────────────────────────────────────
 
 /// Current user-controlled camera values.

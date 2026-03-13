@@ -324,12 +324,33 @@ class EvaCameraPlugin :
                 }
 
                 "setCaptureIntent" -> {
-                    val preview = call.argument<Boolean>("preview") ?: true
-                    manager.setCaptureIntent(preview) { error ->
+                    val intentName = call.argument<String>("intent") ?: "preview"
+                    manager.setCaptureIntent(intentName) { error ->
                         if (error != null) {
                             result.error("CAPTURE_INTENT_FAILED", error.message, null)
                         } else {
                             result.success(null)
+                        }
+                    }
+                }
+
+                "captureImage" -> {
+                    manager.captureImage { data, error ->
+                        if (error != null) {
+                            result.error("CAPTURE_IMAGE_FAILED", error.message, null)
+                        } else {
+                            result.success(data)
+                        }
+                    }
+                }
+
+                "setCaptureFormat" -> {
+                    val format = call.argument<String>("format") ?: "yuv"
+                    manager.setCaptureFormat(format) { info, error ->
+                        if (error != null) {
+                            result.error("CAPTURE_FORMAT_FAILED", error.message, null)
+                        } else {
+                            result.success(info)
                         }
                     }
                 }

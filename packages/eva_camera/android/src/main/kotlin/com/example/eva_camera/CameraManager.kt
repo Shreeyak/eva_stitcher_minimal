@@ -81,6 +81,7 @@ class CameraManager(
     private var aeEnabled: Boolean = false
     private var wbLocked: Boolean = false
     private var captureIntentPreview: Boolean = true
+    private var captureFormatYuv: Boolean = true
 
     // Manual sensor settings (app always starts with AE off)
     private var storedExposureTimeNs: Long = 1_000_000L // 1ms per PLAN_ARCH spec
@@ -187,167 +188,7 @@ class CameraManager(
                     val provider = cameraProviderFuture.get()
                     this.cameraProvider = provider
 
-                    // ── Resolution selectors ──
-                    val captureResolution =
-                        ResolutionSelector
-                            .Builder()
-                            .setResolutionStrategy(
-                                ResolutionStrategy(
-                                    Size(3120, 2160),
-                                    ResolutionStrategy
-                                        .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
-                                ),
-                            ).build()
-
-                    val analysisResolution =
-                        ResolutionSelector
-                            .Builder()
-                            .setResolutionStrategy(
-                                ResolutionStrategy(
-                                    Size(640, 480),
-                                    ResolutionStrategy
-                                        .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
-                                ),
-                            ).build()
-
-                    // ── Preview ──
-                    val preview =
-                        Preview
-                            .Builder()
-                            .setTargetRotation(Surface.ROTATION_0)
-                            .build()
-                            .also { it.setSurfaceProvider(pv.surfaceProvider) }
-
-                    // ── ImageCapture (ZSL for lowest-latency shutter) ──
-                    imageCapture =
-                        ImageCapture
-                            .Builder()
-                            .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
-                            .setResolutionSelector(captureResolution)
-                            .setTargetRotation(Surface.ROTATION_0)
-                            .build()
-
-                    // ── ImageAnalysis (YUV_420_888 for future C++ BGR conversion) ──
-                    val analysisBuilder =
-                        ImageAnalysis
-                            .Builder()
-                            .setResolutionSelector(analysisResolution)
-                            .setOutputImageFormat(
-                                ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888,
-                            ).setBackpressureStrategy(
-                                ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST,
-                            ).setTargetRotation(Surface.ROTATION_0)
-
-                    // Attach Camera2 capture callback to snoop live AWB/AF values
-                    Camera2Interop
-                        .Extender(analysisBuilder)
-                        .setSessionCaptureCallback(
-                            object : CameraCaptureSession.CaptureCallback() {
-                                override fun onCaptureCompleted(
-                                    session: CameraCaptureSession,
-                                    request: CaptureRequest,
-                                    result: TotalCaptureResult,
-                                ) {
-                                    // Capture live AWB CCM + gains while AWB is running
-                                    val awbMode =
-                                        result.get(CaptureResult.CONTROL_AWB_MODE)
-                                    if (awbMode == CameraMetadata.CONTROL_AWB_MODE_AUTO) {
-                                        result
-                                            .get(
-                                                CaptureResult
-                                                    .COLOR_CORRECTION_TRANSFORM,
-                                            )?.let { capturedColorTransform = it }
-                                        result
-                                            .get(CaptureResult.COLOR_CORRECTION_GAINS)
-                                            ?.let { capturedColorGains = it }
-                                    }
-                                    // Capture live focus distance (only when AF is ON)
-                                    if (afEnabled) {
-                                        result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let {
-                                            capturedFocusDistance = it
-                                        }
-                                    }
-
-                                    // Capture default AE target FPS range once.
-                                    if (defaultAeTargetFpsRange == null) {
-                                        result
-                                            .get(
-                                                CaptureResult
-                                                    .CONTROL_AE_TARGET_FPS_RANGE,
-                                            )?.let {
-                                                defaultAeTargetFpsRange = it
-                                                Log.i(
-                                                    TAG,
-                                                    "Default AE FPS from first capture result: [${it.lower}, ${it.upper}]",
-                                                )
-                                            }
-                                    }
-
-                                    // Store latest capture result for diagnostic dumps
-                                    latestCaptureResult = result
-                                }
-                            },
-                        )
-
-                    imageAnalysis =
-                        analysisBuilder.build().also { analysis ->
-                            analysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
-                                processFrame(imageProxy)
-                            }
-                        }
-
-                    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                    provider.unbindAll()
-                    val cam =
-                        provider.bindToLifecycle(
-                            lifecycleOwner,
-                            cameraSelector,
-                            preview,
-                            imageCapture!!,
-                            imageAnalysis!!,
-                        )
-                    this.camera = cam
-
-                    // Resolve and store supported/default/selected AE FPS ranges right after
-                    // camera bind.
-                    val selectedRange = resolveMaxAeFpsRange(cam)
-                    aeTargetFpsRange = selectedRange
-                    val availableRangesLabel =
-                        if (availableAeTargetFpsRanges.isEmpty()) {
-                            "<none>"
-                        } else {
-                            availableAeTargetFpsRanges.joinToString(", ") {
-                                "[${it.lower}, ${it.upper}]"
-                            }
-                        }
-                    val selectedRangeLabel =
-                        selectedRange?.let { "[${it.lower}, ${it.upper}]" } ?: "<none>"
-                    Log.i(TAG, "AE FPS ranges available: $availableRangesLabel")
-                    Log.i(TAG, "AE FPS selected max range: $selectedRangeLabel")
-
-                    // Load static characteristics (CCM, ranges) and dump to file
-                    loadStaticColorTransform(cam)
-
-                    // Reset frame counter
-                    frameCount = 0
-                    lastFpsTime = System.nanoTime()
-                    lastFpsFrameCount = 0
-                    currentFps = 0.0
-
-                    // Start FPS reporting timer
-                    startFpsTimer()
-
-                    applyAllCaptureOptions(cam) { error ->
-                        if (error != null) {
-                            Log.e(TAG, "Initial capture options apply failed", error)
-                            callback(null, error)
-                        } else {
-                            callback(gatherResolutionInfo(), null)
-                            pushEvent("status", "camera", "Camera started")
-                            pushSettingsStatus()
-                        }
-                    }
+                    rebindUseCases(pv, provider, callback)
                 } catch (e: Exception) {
                     Log.e(TAG, "Camera start failed", e)
                     callback(null, e)
@@ -355,6 +196,188 @@ class CameraManager(
             },
             ContextCompat.getMainExecutor(context),
         )
+    }
+
+    /**
+     * Build and bind all use cases (Preview, ImageCapture, ImageAnalysis) to the camera.
+     * Called from [startCamera] and [setCaptureFormat] to apply format/resolution changes.
+     */
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun rebindUseCases(
+        pv: PreviewView,
+        provider: ProcessCameraProvider,
+        callback: (Map<String, Any>?, Exception?) -> Unit,
+    ) {
+        try {
+            // ── Resolution selectors ──
+            val captureResolution =
+                ResolutionSelector
+                    .Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            Size(4208, 3120),
+                            ResolutionStrategy
+                                .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                        ),
+                    ).build()
+
+            val analysisResolution =
+                ResolutionSelector
+                    .Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            Size(1280, 960),
+                            ResolutionStrategy
+                                .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                        ),
+                    ).build()
+
+            // ── Preview ──
+            val preview =
+                Preview
+                    .Builder()
+                    .setTargetRotation(Surface.ROTATION_0)
+                    .build()
+                    .also { it.setSurfaceProvider(pv.surfaceProvider) }
+
+            // ── ImageCapture (ZSL, output format from captureFormatYuv state) ──
+            val captureBuilder =
+                ImageCapture
+                    .Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
+                    .setResolutionSelector(captureResolution)
+                    .setTargetRotation(Surface.ROTATION_0)
+
+            if (captureFormatYuv) {
+                captureBuilder.setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
+            }
+            imageCapture = captureBuilder.build()
+
+            // ── ImageAnalysis (YUV_420_888 for future C++ BGR conversion) ──
+            val analysisBuilder =
+                ImageAnalysis
+                    .Builder()
+                    .setResolutionSelector(analysisResolution)
+                    .setOutputImageFormat(
+                        ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888,
+                    ).setBackpressureStrategy(
+                        ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST,
+                    ).setTargetRotation(Surface.ROTATION_0)
+
+            // Attach Camera2 capture callback to snoop live AWB/AF values
+            Camera2Interop
+                .Extender(analysisBuilder)
+                .setSessionCaptureCallback(
+                    object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            result: TotalCaptureResult,
+                        ) {
+                            // Capture live AWB CCM + gains while AWB is running
+                            val awbMode =
+                                result.get(CaptureResult.CONTROL_AWB_MODE)
+                            if (awbMode == CameraMetadata.CONTROL_AWB_MODE_AUTO) {
+                                result
+                                    .get(
+                                        CaptureResult
+                                            .COLOR_CORRECTION_TRANSFORM,
+                                    )?.let { capturedColorTransform = it }
+                                result
+                                    .get(CaptureResult.COLOR_CORRECTION_GAINS)
+                                    ?.let { capturedColorGains = it }
+                            }
+                            // Capture live focus distance (only when AF is ON)
+                            if (afEnabled) {
+                                result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let {
+                                    capturedFocusDistance = it
+                                }
+                            }
+
+                            // Capture default AE target FPS range once.
+                            if (defaultAeTargetFpsRange == null) {
+                                result
+                                    .get(
+                                        CaptureResult
+                                            .CONTROL_AE_TARGET_FPS_RANGE,
+                                    )?.let {
+                                        defaultAeTargetFpsRange = it
+                                        Log.i(
+                                            TAG,
+                                            "Default AE FPS from first capture result: [${it.lower}, ${it.upper}]",
+                                        )
+                                    }
+                            }
+
+                            // Store latest capture result for diagnostic dumps
+                            latestCaptureResult = result
+                        }
+                    },
+                )
+
+            imageAnalysis =
+                analysisBuilder.build().also { analysis ->
+                    analysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
+                        processFrame(imageProxy)
+                    }
+                }
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            provider.unbindAll()
+            val cam =
+                provider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    imageCapture!!,
+                    imageAnalysis!!,
+                )
+            this.camera = cam
+
+            // Resolve and store supported/default/selected AE FPS ranges right after
+            // camera bind.
+            val selectedRange = resolveMaxAeFpsRange(cam)
+            aeTargetFpsRange = selectedRange
+            val availableRangesLabel =
+                if (availableAeTargetFpsRanges.isEmpty()) {
+                    "<none>"
+                } else {
+                    availableAeTargetFpsRanges.joinToString(", ") {
+                        "[${it.lower}, ${it.upper}]"
+                    }
+                }
+            val selectedRangeLabel =
+                selectedRange?.let { "[${it.lower}, ${it.upper}]" } ?: "<none>"
+            Log.i(TAG, "AE FPS ranges available: $availableRangesLabel")
+            Log.i(TAG, "AE FPS selected max range: $selectedRangeLabel")
+
+            // Load static characteristics (CCM, ranges) and dump to file
+            loadStaticColorTransform(cam)
+
+            // Reset frame counter
+            frameCount = 0
+            lastFpsTime = System.nanoTime()
+            lastFpsFrameCount = 0
+            currentFps = 0.0
+
+            // Start FPS reporting timer
+            startFpsTimer()
+
+            applyAllCaptureOptions(cam) { error ->
+                if (error != null) {
+                    Log.e(TAG, "Initial capture options apply failed", error)
+                    callback(null, error)
+                } else {
+                    callback(gatherResolutionInfo(), null)
+                    pushEvent("status", "camera", "Camera started")
+                    pushSettingsStatus()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera bind failed", e)
+            callback(null, e)
+        }
     }
 
     /** Stop the camera and release resources. */
@@ -690,26 +713,53 @@ class CameraManager(
     // ── Capture intent ──────────────────────────────────────────────────
 
     fun setCaptureIntent(
-        preview: Boolean,
+        intentName: String,
         callback: (Exception?) -> Unit,
     ) {
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
-        captureIntentPreview = preview
+        val prev = captureIntentPreview
+        captureIntentPreview = (intentName == "preview")
         applyAllCaptureOptions(cam) { e ->
             if (e != null) {
-                captureIntentPreview = !preview
+                captureIntentPreview = prev
                 callback(e)
             } else {
-                val label = if (preview) "PREVIEW" else "STILL_CAPTURE"
+                val label = if (captureIntentPreview) "PREVIEW" else "STILL_CAPTURE"
                 Log.i(TAG, "Capture intent → $label")
                 callback(null)
             }
         }
     }
 
+    // ── Capture format ──────────────────────────────────────────────────
+
+    /**
+     * Switch ImageCapture output format between YUV_420_888 and JPEG.
+     * Triggers a full camera rebind (brief preview interruption).
+     */
+    fun setCaptureFormat(
+        formatName: String,
+        callback: (Map<String, Any>?, Exception?) -> Unit,
+    ) {
+        val pv = previewView ?: return callback(null, IllegalStateException("PreviewView not ready"))
+        val provider = cameraProvider ?: return callback(null, IllegalStateException("Camera not ready"))
+
+        captureFormatYuv = (formatName == "yuv")
+        Log.i(TAG, "setCaptureFormat → ${if (captureFormatYuv) "YUV_420_888" else "JPEG"}, rebinding…")
+        rebindUseCases(pv, provider, callback)
+    }
+
     // ── Save frame ──────────────────────────────────────────────────────
 
     fun saveFrame(callback: (String?, Exception?) -> Unit) {
+        if (captureFormatYuv) {
+            return callback(
+                null,
+                IllegalStateException(
+                    "saveFrame requires JPEG format — call setCaptureFormat(\"jpeg\") first",
+                ),
+            )
+        }
         val capture =
             imageCapture ?: return callback(null, IllegalStateException("Camera not ready"))
         val executor =
@@ -788,6 +838,67 @@ class CameraManager(
         )
     }
 
+    // ── Capture image buffer ──────────────────────────────────────────────
+
+    /**
+     * Capture a full-resolution image from ImageCapture.
+     * Returns YUV planes or JPEG bytes depending on the current [captureFormatYuv] setting.
+     */
+    fun captureImage(callback: (Map<String, Any>?, Exception?) -> Unit) {
+        val capture =
+            imageCapture ?: return callback(null, IllegalStateException("Camera not ready"))
+        val executor =
+            cameraExecutor
+                ?: return callback(null, IllegalStateException("Camera executor not available"))
+
+        capture.takePicture(
+            executor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                    val w = imageProxy.width
+                    val h = imageProxy.height
+                    val rotation = imageProxy.imageInfo.rotationDegrees
+
+                    val result =
+                        mutableMapOf<String, Any>(
+                            "width" to w,
+                            "height" to h,
+                            "rotation" to rotation,
+                        )
+
+                    if (captureFormatYuv) {
+                        result["format"] = "yuv"
+                        val yPlane = imageProxy.planes[0]
+                        val uPlane = imageProxy.planes[1]
+                        val vPlane = imageProxy.planes[2]
+                        result["yPlane"] = ByteArray(yPlane.buffer.remaining()).also { yPlane.buffer.get(it) }
+                        result["uPlane"] = ByteArray(uPlane.buffer.remaining()).also { uPlane.buffer.get(it) }
+                        result["vPlane"] = ByteArray(vPlane.buffer.remaining()).also { vPlane.buffer.get(it) }
+                        result["yRowStride"] = yPlane.rowStride
+                        result["uvRowStride"] = uPlane.rowStride
+                        result["uvPixelStride"] = uPlane.pixelStride
+                        Log.i(TAG, "captureImage(YUV): ${w}x$h")
+                    } else {
+                        result["format"] = "jpeg"
+                        val buffer = imageProxy.planes[0].buffer
+                        val bytes = ByteArray(buffer.remaining())
+                        buffer.get(bytes)
+                        result["bytes"] = bytes
+                        Log.i(TAG, "captureImage(JPEG): ${w}x$h, ${bytes.size} bytes")
+                    }
+
+                    imageProxy.close()
+                    mainHandler.post { callback(result, null) }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e(TAG, "captureImage failed", exception)
+                    mainHandler.post { callback(null, exception) }
+                }
+            },
+        )
+    }
+
     /**
      * Dumps all available CameraCharacteristics keys and active camera properties for
      * the currently bound CameraX camera instance.
@@ -848,7 +959,10 @@ class CameraManager(
         val builder =
             CaptureRequestOptions
                 .Builder()
-                .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, afMode)
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_MODE,
+                    CameraMetadata.CONTROL_MODE_OFF,
+                ).setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, afMode)
                 .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, aeMode)
 
         // AE FPS range: keep the selected device-supported max range.
