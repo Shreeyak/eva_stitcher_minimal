@@ -246,10 +246,6 @@ class EvaCameraPlugin :
                     }
                 }
 
-                "getMinFocusDistance" -> {
-                    result.success(manager.getMinFocusDistance().toDouble())
-                }
-
                 "getCurrentFocusDistance" -> {
                     result.success(manager.getCurrentFocusDistance().toDouble())
                 }
@@ -269,14 +265,6 @@ class EvaCameraPlugin :
                     }
                 }
 
-                "getMinZoomRatio" -> {
-                    result.success(manager.getMinZoomRatio().toDouble())
-                }
-
-                "getMaxZoomRatio" -> {
-                    result.success(manager.getMaxZoomRatio().toDouble())
-                }
-
                 "setZoomRatio" -> {
                     val ratio = call.argument<Double>("ratio") ?: 1.0
                     manager.setZoomRatio(ratio.toFloat()) { error ->
@@ -292,10 +280,6 @@ class EvaCameraPlugin :
                     result.success(manager.getResolutionInfo())
                 }
 
-                "getExposureTimeRangeNs" -> {
-                    result.success(manager.getExposureTimeRangeNs())
-                }
-
                 "setExposureTimeNs" -> {
                     val ns = (call.argument<Number>("ns") ?: 1_000_000L).toLong()
                     manager.setExposureTimeNs(ns) { error ->
@@ -305,10 +289,6 @@ class EvaCameraPlugin :
                             result.success(null)
                         }
                     }
-                }
-
-                "getIsoRange" -> {
-                    result.success(manager.getIsoRange())
                 }
 
                 "setIso" -> {

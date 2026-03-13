@@ -63,15 +63,43 @@ class CameraStartInfo extends CameraResolutionInfo {
     super.captureHeight,
     super.analysisWidth,
     super.analysisHeight,
+    this.minFocusDistance = 0.0,
+    this.minZoomRatio = 1.0,
+    this.maxZoomRatio = 1.0,
+    this.exposureTimeRangeNs = const [1000000, 1000000000],
+    this.isoRange = const [100, 3200],
   });
+
+  final double minFocusDistance;
+  final double minZoomRatio;
+  final double maxZoomRatio;
+  final List<int> exposureTimeRangeNs;
+  final List<int> isoRange;
 
   factory CameraStartInfo.fromMap(Map<dynamic, dynamic> map) {
     final info = CameraResolutionInfo.fromMap(map);
+    List<int> parseIntList(Object? value, {required List<int> fallback}) {
+      final raw = value as List?;
+      if (raw == null || raw.length < 2) return fallback;
+      return [
+        (raw[0] as num?)?.toInt() ?? fallback[0],
+        (raw[1] as num?)?.toInt() ?? fallback[1],
+      ];
+    }
+
     return CameraStartInfo(
       captureWidth: info.captureWidth,
       captureHeight: info.captureHeight,
       analysisWidth: info.analysisWidth,
       analysisHeight: info.analysisHeight,
+      minFocusDistance: (map['minFocusDistance'] as num?)?.toDouble() ?? 0.0,
+      minZoomRatio: (map['minZoomRatio'] as num?)?.toDouble() ?? 1.0,
+      maxZoomRatio: (map['maxZoomRatio'] as num?)?.toDouble() ?? 1.0,
+      exposureTimeRangeNs: parseIntList(
+        map['exposureTimeRangeNs'],
+        fallback: const [1000000, 1000000000],
+      ),
+      isoRange: parseIntList(map['isoRange'], fallback: const [100, 3200]),
     );
   }
 }

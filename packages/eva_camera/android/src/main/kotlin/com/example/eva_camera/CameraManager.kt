@@ -183,7 +183,12 @@ class CameraManager(
                     val provider = cameraProviderFuture.get()
                     this.cameraProvider = provider
 
-                    rebindUseCases(pv, provider, callback)
+                    rebindUseCases(
+                        pv = pv,
+                        provider = provider,
+                        includeCapabilitiesInResult = true,
+                        callback = callback,
+                    )
                 } catch (e: Exception) {
                     Log.e(TAG, "Camera start failed", e)
                     callback(null, e)
@@ -201,6 +206,7 @@ class CameraManager(
     private fun rebindUseCases(
         pv: PreviewView,
         provider: ProcessCameraProvider,
+        includeCapabilitiesInResult: Boolean = false,
         callback: (Map<String, Any>?, Exception?) -> Unit,
     ) {
         try {
@@ -365,7 +371,8 @@ class CameraManager(
                     Log.e(TAG, "Initial capture options apply failed", error)
                     callback(null, error)
                 } else {
-                    callback(gatherResolutionInfo(), null)
+                    val payload = if (includeCapabilitiesInResult) gatherStartupInfo(cam) else gatherResolutionInfo()
+                    callback(payload, null)
                     pushEvent("status", "camera", "Camera started")
                     pushSettingsStatus()
                 }
@@ -522,15 +529,6 @@ class CameraManager(
         }
     }
 
-    @OptIn(ExperimentalCamera2Interop::class)
-    fun getMinFocusDistance(): Float {
-        val cam = camera ?: return 0f
-        return Camera2CameraInfo
-            .from(cam.cameraInfo)
-            .getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
-            ?: 0f
-    }
-
     fun getCurrentFocusDistance(): Float = capturedFocusDistance ?: 0f
 
     fun setFocusDistance(
@@ -595,12 +593,6 @@ class CameraManager(
 
     // ── Manual sensor exposure / ISO ─────────────────────────────────
 
-    /** Returns [min, max] sensor exposure time in nanoseconds, or a safe default. */
-    fun getExposureTimeRangeNs(): List<Long> {
-        val r = exposureTimeRangeNs ?: return listOf(1_000_000L, 1_000_000_000L)
-        return listOf(r.lower, r.upper)
-    }
-
     /** Set the sensor exposure time (nanoseconds). */
     fun setExposureTimeNs(
         ns: Long,
@@ -609,12 +601,6 @@ class CameraManager(
         val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
         storedExposureTimeNs = ns
         applyAllCaptureOptions(cam, callback)
-    }
-
-    /** Returns [min, max] sensor sensitivity (ISO), or a safe default. */
-    fun getIsoRange(): List<Int> {
-        val r = sensitivityIsoRange ?: return listOf(100, 3200)
-        return listOf(r.lower, r.upper)
     }
 
     /** Set the sensor ISO. */
@@ -628,20 +614,6 @@ class CameraManager(
     }
 
     // ── Zoom control ────────────────────────────────────────────────────
-
-    fun getMinZoomRatio(): Float =
-        camera
-            ?.cameraInfo
-            ?.zoomState
-            ?.value
-            ?.minZoomRatio ?: 1f
-
-    fun getMaxZoomRatio(): Float =
-        camera
-            ?.cameraInfo
-            ?.zoomState
-            ?.value
-            ?.maxZoomRatio ?: 1f
 
     fun setZoomRatio(
         ratio: Float,
@@ -746,7 +718,7 @@ class CameraManager(
         val prev = captureFormatYuv
         captureFormatYuv = (formatName == "yuv")
         Log.i(TAG, "setCaptureFormat → ${if (captureFormatYuv) "YUV_420_888" else "JPEG"}, rebinding…")
-        rebindUseCases(pv, provider) { info, error ->
+        rebindUseCases(pv = pv, provider = provider) { info, error ->
             if (error != null) captureFormatYuv = prev
             callback(info, error)
         }
@@ -824,6 +796,38 @@ class CameraManager(
             result["analysisWidth"] = it.width
             result["analysisHeight"] = it.height
         }
+        return result
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun gatherStartupInfo(cam: Camera): Map<String, Any> {
+        val result = gatherResolutionInfo().toMutableMap()
+
+        val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
+        val minFocusDistance =
+            camera2Info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+                ?: 0f
+        val zoomState = cam.cameraInfo.zoomState.value
+
+        val exposureRange = exposureTimeRangeNs
+        val isoRange = sensitivityIsoRange
+
+        result["minFocusDistance"] = minFocusDistance.toDouble()
+        result["minZoomRatio"] = (zoomState?.minZoomRatio ?: 1f).toDouble()
+        result["maxZoomRatio"] = (zoomState?.maxZoomRatio ?: 1f).toDouble()
+        result["exposureTimeRangeNs"] =
+            if (exposureRange != null) {
+                listOf(exposureRange.lower, exposureRange.upper)
+            } else {
+                listOf(1_000_000L, 1_000_000_000L)
+            }
+        result["isoRange"] =
+            if (isoRange != null) {
+                listOf(isoRange.lower, isoRange.upper)
+            } else {
+                listOf(100, 3200)
+            }
+
         return result
     }
 

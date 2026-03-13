@@ -10,7 +10,7 @@ in-process image stitching.
 
 ## Architecture
 
-```
+```text
 Flutter (Dart)          Kotlin                       C++ / JNI
 ──────────────          ──────────────────────────   ──────────────────────
 CameraControl  ──────►  EvaCameraPlugin              NativeStitcher
@@ -25,11 +25,9 @@ CameraControl  ──────►  EvaCameraPlugin              NativeStitche
 
 Three CameraX use cases run simultaneously:
 
-| Use case | Resolution | Output |
-|---|---|---|
-| Preview | device default | `PreviewView` PlatformView |
-| ImageCapture | 4208×3120 | Delivered to `StillCaptureProcessor` |
-| ImageAnalysis | 1280×960 | Delivered to `FrameProcessor` (YUV, ~30 fps) |
+- Preview — device default, output to `PreviewView` PlatformView.
+- ImageCapture — 4208×3120, delivered to `StillCaptureProcessor`.
+- ImageAnalysis — 1280×960, delivered to `FrameProcessor` (YUV, ~30 fps).
 
 ---
 
@@ -93,7 +91,10 @@ final granted = await CameraControl.requestPermission();
 if (!granted) return;
 
 final info = await CameraControl.startCamera();
-// CameraStartInfo fields: captureWidth, captureHeight, analysisWidth, analysisHeight
+// CameraStartInfo fields:
+// captureWidth, captureHeight, analysisWidth, analysisHeight,
+// minFocusDistance, minZoomRatio, maxZoomRatio,
+// exposureTimeRangeNs [min,max], isoRange [min,max]
 ```
 
 ### 3. Embed the preview surface
@@ -111,7 +112,7 @@ AndroidView(
 
 ### Signal flow — photo save (triggered from Dart)
 
-```
+```text
 Dart: CameraControl.captureImage(save: true)
   → MethodChannel: {method: captureImage, save: true}
   → CameraManager.captureImage(save=true, callback)
@@ -127,7 +128,7 @@ await CameraControl.captureImage(save: true);
 
 ### Signal flow — stitcher capture (triggered from native Kotlin)
 
-```
+```text
 NativeStitcher (Kotlin): cameraManager.captureImage(save=false, callback)
   → StillCaptureProcessor.onStillCapture(imageProxy, captureResult, save=false)
   → extract Y/RGB planes → NativeStitcher.addFrame(...)
@@ -151,58 +152,49 @@ All methods are static on `CameraControl`. Returns are `Future<void>` unless not
 
 ### Capture
 
-| Method | Description |
-|---|---|
-| `captureImage({save: false})` | Trigger full-resolution still capture |
-| `setCaptureFormat(CaptureFormat)` | Switch between `yuv` and `jpeg` (triggers rebind) |
-| `setCaptureIntent(CaptureIntent)` | `preview` or `stillCapture` hint to camera pipeline |
+- `captureImage({save: false})` — Trigger full-resolution still capture.
+- `setCaptureFormat(CaptureFormat)` — Switch between `yuv` and `jpeg` (triggers rebind).
+- `setCaptureIntent(CaptureIntent)` — `preview` or `stillCapture` hint to camera pipeline.
 
 ### Exposure
 
-| Method | Returns | Description |
-|---|---|---|
-| `setAeEnabled(bool)` | — | Enable/disable auto-exposure |
-| `getExposureOffsetRange()` | `List<int>` | AE compensation index range |
-| `getExposureOffsetStep()` | `double` | EV per index step |
-| `setExposureOffset(int)` | — | Set AE compensation index |
-| `getExposureTimeRangeNs()` | `List<int>` | Manual shutter range (ns) |
-| `setExposureTimeNs(int)` | — | Set manual shutter speed |
-| `getIsoRange()` | `List<int>` | ISO range |
-| `setIso(int)` | — | Set manual ISO |
+| Method                     | Returns     | Description                  |
+| -------------------------- | ----------- | ---------------------------- |
+| `setAeEnabled(bool)`       | —           | Enable/disable auto-exposure |
+| `getExposureOffsetRange()` | `List<int>` | AE compensation index range  |
+| `getExposureOffsetStep()`  | `double`    | EV per index step            |
+| `setExposureOffset(int)`   | —           | Set AE compensation index    |
+| `setExposureTimeNs(int)`   | —           | Set manual shutter speed     |
+| `setIso(int)`              | —           | Set manual ISO               |
 
 ### Focus
 
-| Method | Returns | Description |
-|---|---|---|
-| `setAfEnabled(bool)` | — | Enable/disable auto-focus |
-| `getMinFocusDistance()` | `double` | Minimum focus distance (diopters) |
-| `getCurrentFocusDistance()` | `double` | Current lens position |
-| `setFocusDistance(double)` | — | Set manual focus distance |
+| Method                      | Returns  | Description               |
+| --------------------------- | -------- | ------------------------- |
+| `setAfEnabled(bool)`        | —        | Enable/disable auto-focus |
+| `getCurrentFocusDistance()` | `double` | Current lens position     |
+| `setFocusDistance(double)`  | —        | Set manual focus distance |
 
 ### White Balance
 
-| Method | Returns | Description |
-|---|---|---|
-| `lockWhiteBalance()` | `bool` | Freeze AWB gains+CCM |
-| `unlockWhiteBalance()` | `bool` | Resume AWB |
-| `isWbLocked()` | `bool` | Query current WB lock state |
+| Method                 | Returns | Description                 |
+| ---------------------- | ------- | --------------------------- |
+| `lockWhiteBalance()`   | `bool`  | Freeze AWB gains+CCM        |
+| `unlockWhiteBalance()` | `bool`  | Resume AWB                  |
+| `isWbLocked()`         | `bool`  | Query current WB lock state |
 
 ### Zoom
 
-| Method | Returns | Description |
-|---|---|---|
-| `getMinZoomRatio()` | `double` | Min hardware zoom |
-| `getMaxZoomRatio()` | `double` | Max hardware zoom |
-| `setZoomRatio(double)` | — | Set zoom |
+| Method                 | Returns | Description |
+| ---------------------- | ------- | ----------- |
+| `setZoomRatio(double)` | —       | Set zoom    |
 
 ### Diagnostics
 
-| Method | Returns | Description |
-|---|---|---|
-| `startCamera()` | `CameraStartInfo` | Starts camera and returns startup resolution payload |
-| `getResolution()` | `CameraResolutionInfo` | Current capture + analysis resolutions |
-| `setCaptureFormat(CaptureFormat)` | `CameraResolutionInfo` | Switches capture format and returns updated resolutions |
-| `dumpActiveCameraSettings()` | `CameraSettingsDumpInfo` | Dump path + key counts for the generated settings file |
+- `startCamera()` → `CameraStartInfo`: starts camera and returns resolution + capability ranges in one payload.
+- `getResolution()` → `CameraResolutionInfo`: current capture + analysis resolutions.
+- `setCaptureFormat(CaptureFormat)` → `CameraResolutionInfo`: switches capture format and returns updated resolutions.
+- `dumpActiveCameraSettings()` → `CameraSettingsDumpInfo`: dump path + key counts for the generated settings file.
 
 ---
 
@@ -222,11 +214,9 @@ CameraControl.events.receiveBroadcastStream().listen((data) {
 
 ## `imageProxy.close()` contract
 
-| Code path | Who closes |
-|---|---|
-| `StillCaptureProcessor.onStillCapture` | **`CameraManager`** (finally block) |
-| `FrameProcessor.processFrame` | **`CameraManager`** (finally block in `processFrame`) |
-| No processor registered | **`CameraManager`** (immediate close + warning log) |
+- `StillCaptureProcessor.onStillCapture` → **`CameraManager`** (finally block)
+- `FrameProcessor.processFrame` → **`CameraManager`** (finally block in `processFrame`)
+- No processor registered → **`CameraManager`** (immediate close + warning log)
 
 Processors must not call `close()`. All buffer access must complete before the callback returns.
 

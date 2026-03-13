@@ -90,11 +90,6 @@ class CameraControl {
   static Future<void> setAfEnabled(bool enabled) =>
       _method.invokeMethod('setAfEnabled', {'enabled': enabled});
 
-  static Future<double> getMinFocusDistance() async {
-    final result = await _method.invokeMethod<double>('getMinFocusDistance');
-    return result ?? 0.0;
-  }
-
   static Future<double> getCurrentFocusDistance() async {
     final result = await _method.invokeMethod<double>(
       'getCurrentFocusDistance',
@@ -107,19 +102,8 @@ class CameraControl {
 
   // ── Manual sensor (ISO + shutter) ────────────────────────────────
 
-  static Future<List<int>> getExposureTimeRangeNs() async {
-    final result = await _method.invokeMethod<List>('getExposureTimeRangeNs');
-    return result?.map((e) => (e as num).toInt()).toList() ??
-        [1000000, 1000000000];
-  }
-
   static Future<void> setExposureTimeNs(int ns) =>
       _method.invokeMethod('setExposureTimeNs', {'ns': ns});
-
-  static Future<List<int>> getIsoRange() async {
-    final result = await _method.invokeMethod<List>('getIsoRange');
-    return result?.map((e) => (e as num).toInt()).toList() ?? [100, 3200];
-  }
 
   static Future<void> setIso(int iso) =>
       _method.invokeMethod('setIso', {'iso': iso});
@@ -130,16 +114,6 @@ class CameraControl {
       _method.invokeMethod('setCaptureIntent', {'intent': intent.name});
 
   // ── Zoom ──────────────────────────────────────────────────────────
-
-  static Future<double> getMinZoomRatio() async {
-    final result = await _method.invokeMethod<double>('getMinZoomRatio');
-    return result ?? 1.0;
-  }
-
-  static Future<double> getMaxZoomRatio() async {
-    final result = await _method.invokeMethod<double>('getMaxZoomRatio');
-    return result ?? 1.0;
-  }
 
   static Future<void> setZoomRatio(double ratio) =>
       _method.invokeMethod('setZoomRatio', {'ratio': ratio});

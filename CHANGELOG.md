@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-13 (camera startup contract unification)
+
+- `startCamera()` now returns capability ranges (`minFocusDistance`, zoom min/max, exposure range, ISO range) together with resolution in `CameraStartInfo`.
+- Removed deprecated per-range calls from plugin/public API and channel wiring: `getIsoRange`, `getExposureTimeRangeNs`, `getMinFocusDistance`, `getMinZoomRatio`, `getMaxZoomRatio`.
+- `lib/main.dart` now builds `CameraRanges` directly from the single `startCamera()` payload (no extra MethodChannel round-trips).
+
 ## 2026-03-13 (typed camera payloads)
 
 - `CameraControl.startCamera()`, `getResolution()`, and `setCaptureFormat()` now return typed `CameraResolutionInfo` (`CameraStartInfo` alias for startup) instead of raw `Map<String, dynamic>`.

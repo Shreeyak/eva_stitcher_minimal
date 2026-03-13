@@ -185,23 +185,12 @@ class _CameraScreenState extends State<CameraScreen> {
         );
       });
 
-      // Fetch device capability ranges — all read-only, safe to parallelize.
-      final results = await Future.wait([
-        CameraControl.getMinFocusDistance(),
-        CameraControl.getMinZoomRatio(),
-        CameraControl.getMaxZoomRatio(),
-        CameraControl.getExposureTimeRangeNs(),
-        CameraControl.getIsoRange(),
-      ]);
-
-      if (!mounted) return;
-
       final ranges = CameraRanges(
-        minFocusDistance: results[0] as double,
-        minZoomRatio: results[1] as double,
-        maxZoomRatio: results[2] as double,
-        exposureTimeRangeNs: results[3] as List<int>,
-        isoRange: results[4] as List<int>,
+        minFocusDistance: info.minFocusDistance,
+        minZoomRatio: info.minZoomRatio,
+        maxZoomRatio: info.maxZoomRatio,
+        exposureTimeRangeNs: info.exposureTimeRangeNs,
+        isoRange: info.isoRange,
       );
       final initial = CameraValues.initialFromRanges(ranges);
 
