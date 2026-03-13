@@ -19,8 +19,38 @@ class CameraControl {
     return granted ?? false;
   }
 
-  static Future<CameraStartInfo> startCamera() async {
-    final result = await _method.invokeMethod<Map>('startCamera');
+  static Future<CameraStartInfo> startCamera({
+    int? captureWidth,
+    int? captureHeight,
+    int? analysisWidth,
+    int? analysisHeight,
+  }) async {
+    final hasCaptureWidth = captureWidth != null;
+    final hasCaptureHeight = captureHeight != null;
+    if (hasCaptureWidth != hasCaptureHeight) {
+      throw ArgumentError(
+        'captureWidth and captureHeight must be provided together.',
+      );
+    }
+
+    final hasAnalysisWidth = analysisWidth != null;
+    final hasAnalysisHeight = analysisHeight != null;
+    if (hasAnalysisWidth != hasAnalysisHeight) {
+      throw ArgumentError(
+        'analysisWidth and analysisHeight must be provided together.',
+      );
+    }
+
+    final args = <String, Object>{
+      if (captureWidth != null) 'captureWidth': captureWidth,
+      if (captureHeight != null) 'captureHeight': captureHeight,
+      if (analysisWidth != null) 'analysisWidth': analysisWidth,
+      if (analysisHeight != null) 'analysisHeight': analysisHeight,
+    };
+
+    final result = args.isEmpty
+        ? await _method.invokeMethod<Map>('startCamera')
+        : await _method.invokeMethod<Map>('startCamera', args);
     return CameraStartInfo.fromMap(result ?? const {});
   }
 

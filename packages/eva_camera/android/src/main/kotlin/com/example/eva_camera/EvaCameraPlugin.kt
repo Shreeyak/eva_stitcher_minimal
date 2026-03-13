@@ -157,7 +157,17 @@ class EvaCameraPlugin :
                 }
 
                 "startCamera" -> {
-                    manager.startCamera { info, error ->
+                    val captureWidth = call.argument<Int>("captureWidth")
+                    val captureHeight = call.argument<Int>("captureHeight")
+                    val analysisWidth = call.argument<Int>("analysisWidth")
+                    val analysisHeight = call.argument<Int>("analysisHeight")
+
+                    manager.startCamera(
+                        captureWidth = captureWidth,
+                        captureHeight = captureHeight,
+                        analysisWidth = analysisWidth,
+                        analysisHeight = analysisHeight,
+                    ) { info, error ->
                         if (error != null) {
                             result.error("CAMERA_START_FAILED", error.message, null)
                         } else {

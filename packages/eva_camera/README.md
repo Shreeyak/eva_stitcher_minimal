@@ -90,11 +90,19 @@ class MainActivity : FlutterActivity() {
 final granted = await CameraControl.requestPermission();
 if (!granted) return;
 
-final info = await CameraControl.startCamera();
+final info = await CameraControl.startCamera(
+    captureWidth: 4208,
+    captureHeight: 3120,
+    analysisWidth: 1280,
+    analysisHeight: 960,
+);
 // CameraStartInfo fields:
 // captureWidth, captureHeight, analysisWidth, analysisHeight,
 // minFocusDistance, minZoomRatio, maxZoomRatio,
 // exposureTimeRangeNs [min,max], isoRange [min,max]
+
+// Any or all resolution pairs are optional.
+// Omit them to keep plugin defaults.
 ```
 
 ### 3. Embed the preview surface
@@ -192,6 +200,7 @@ All methods are static on `CameraControl`. Returns are `Future<void>` unless not
 ### Diagnostics
 
 - `startCamera()` → `CameraStartInfo`: starts camera and returns resolution + capability ranges in one payload.
+- `startCamera(captureWidth?, captureHeight?, analysisWidth?, analysisHeight?)`: optional init-time target resolutions for ImageCapture and ImageAnalysis (width/height must be provided as pairs).
 - `getResolution()` → `CameraResolutionInfo`: current capture + analysis resolutions.
 - `setCaptureFormat(CaptureFormat)` → `CameraResolutionInfo`: switches capture format and returns updated resolutions.
 - `dumpActiveCameraSettings()` → `CameraSettingsDumpInfo`: dump path + key counts for the generated settings file.

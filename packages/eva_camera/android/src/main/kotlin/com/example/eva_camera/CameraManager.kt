@@ -77,6 +77,8 @@ class CameraManager(
     private var wbLocked: Boolean = false
     private var captureIntentPreview: Boolean = true
     private var captureFormatYuv: Boolean = true
+    private var preferredCaptureSize: Size = Size(4208, 3120)
+    private var preferredAnalysisSize: Size = Size(1280, 960)
 
     // Manual sensor settings (app always starts with AE off)
     private var storedExposureTimeNs: Long = 1_000_000L // 1ms per PLAN_ARCH spec
@@ -135,7 +137,7 @@ class CameraManager(
         pendingStartCallback?.let { callback ->
             pendingStartCallback = null
             Log.i(TAG, "Executing deferred startCamera")
-            startCamera(callback)
+            startCamera(callback = callback)
         }
     }
 
@@ -158,7 +160,25 @@ class CameraManager(
      * info via callback on the main thread.
      */
     @OptIn(ExperimentalCamera2Interop::class)
-    fun startCamera(callback: (Map<String, Any>?, Exception?) -> Unit) {
+    fun startCamera(
+        captureWidth: Int? = null,
+        captureHeight: Int? = null,
+        analysisWidth: Int? = null,
+        analysisHeight: Int? = null,
+        callback: (Map<String, Any>?, Exception?) -> Unit,
+    ) {
+        try {
+            applyStartResolutionOverrides(
+                captureWidth = captureWidth,
+                captureHeight = captureHeight,
+                analysisWidth = analysisWidth,
+                analysisHeight = analysisHeight,
+            )
+        } catch (e: IllegalArgumentException) {
+            callback(null, e)
+            return
+        }
+
         val pv = previewView
         if (pv == null) {
             Log.i(TAG, "PreviewView not ready, deferring startCamera")
@@ -216,7 +236,7 @@ class CameraManager(
                     .Builder()
                     .setResolutionStrategy(
                         ResolutionStrategy(
-                            Size(4208, 3120),
+                            preferredCaptureSize,
                             ResolutionStrategy
                                 .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
                         ),
@@ -227,7 +247,7 @@ class CameraManager(
                     .Builder()
                     .setResolutionStrategy(
                         ResolutionStrategy(
-                            Size(1280, 960),
+                            preferredAnalysisSize,
                             ResolutionStrategy
                                 .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
                         ),
@@ -785,6 +805,34 @@ class CameraManager(
     // ── Resolution info ─────────────────────────────────────────────────
 
     fun getResolutionInfo(): Map<String, Any> = gatherResolutionInfo()
+
+    private fun applyStartResolutionOverrides(
+        captureWidth: Int?,
+        captureHeight: Int?,
+        analysisWidth: Int?,
+        analysisHeight: Int?,
+    ) {
+        if ((captureWidth == null) != (captureHeight == null)) {
+            throw IllegalArgumentException("captureWidth and captureHeight must be provided together")
+        }
+        if ((analysisWidth == null) != (analysisHeight == null)) {
+            throw IllegalArgumentException("analysisWidth and analysisHeight must be provided together")
+        }
+
+        if (captureWidth != null && captureHeight != null) {
+            require(captureWidth > 0 && captureHeight > 0) {
+                "captureWidth and captureHeight must be > 0"
+            }
+            preferredCaptureSize = Size(captureWidth, captureHeight)
+        }
+
+        if (analysisWidth != null && analysisHeight != null) {
+            require(analysisWidth > 0 && analysisHeight > 0) {
+                "analysisWidth and analysisHeight must be > 0"
+            }
+            preferredAnalysisSize = Size(analysisWidth, analysisHeight)
+        }
+    }
 
     private fun gatherResolutionInfo(): Map<String, Any> {
         val result = mutableMapOf<String, Any>()
