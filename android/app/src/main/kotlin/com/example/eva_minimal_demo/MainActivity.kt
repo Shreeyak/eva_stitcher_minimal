@@ -1,5 +1,6 @@
 package com.example.eva_minimal_demo
 
+import android.hardware.camera2.TotalCaptureResult
 import com.example.eva_camera.EvaCameraPlugin
 import com.example.eva_camera.FrameProcessor
 import io.flutter.embedding.android.FlutterActivity
@@ -20,6 +21,7 @@ class MainActivity : FlutterActivity() {
                     yRowStride: Int,
                     uvRowStride: Int,
                     uvPixelStride: Int,
+                    captureResult: TotalCaptureResult?,
                 ): Float =
                     NativeStitcher.processFrame(
                         width,

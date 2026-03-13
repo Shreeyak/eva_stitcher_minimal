@@ -80,6 +80,7 @@ class CameraManager(
     private var afEnabled: Boolean = true
     private var aeEnabled: Boolean = false
     private var wbLocked: Boolean = false
+    private var captureIntentPreview: Boolean = true
 
     // Manual sensor settings (app always starts with AE off)
     private var storedExposureTimeNs: Long = 1_000_000L // 1ms per PLAN_ARCH spec
@@ -217,11 +218,11 @@ class CameraManager(
                             .build()
                             .also { it.setSurfaceProvider(pv.surfaceProvider) }
 
-                    // ── ImageCapture ──
+                    // ── ImageCapture (ZSL for lowest-latency shutter) ──
                     imageCapture =
                         ImageCapture
                             .Builder()
-                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                            .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
                             .setResolutionSelector(captureResolution)
                             .setTargetRotation(Surface.ROTATION_0)
                             .build()
@@ -407,6 +408,8 @@ class CameraManager(
             val uBytes = ByteArray(uBuf.remaining()).also { uBuf.get(it) }
             val vBytes = ByteArray(vBuf.remaining()).also { vBuf.get(it) }
 
+            val captureResult = latestCaptureResult
+
             processor.processFrame(
                 width = imageProxy.width,
                 height = imageProxy.height,
@@ -416,6 +419,7 @@ class CameraManager(
                 yRowStride = yPlane.rowStride,
                 uvRowStride = uPlane.rowStride,
                 uvPixelStride = uPlane.pixelStride,
+                captureResult = captureResult,
             )
         } finally {
             imageProxy.close()
@@ -683,6 +687,26 @@ class CameraManager(
 
     fun isWbLocked(): Boolean = wbLocked
 
+    // ── Capture intent ──────────────────────────────────────────────────
+
+    fun setCaptureIntent(
+        preview: Boolean,
+        callback: (Exception?) -> Unit,
+    ) {
+        val cam = camera ?: return callback(IllegalStateException("Camera not ready"))
+        captureIntentPreview = preview
+        applyAllCaptureOptions(cam) { e ->
+            if (e != null) {
+                captureIntentPreview = !preview
+                callback(e)
+            } else {
+                val label = if (preview) "PREVIEW" else "STILL_CAPTURE"
+                Log.i(TAG, "Capture intent → $label")
+                callback(null)
+            }
+        }
+    }
+
     // ── Save frame ──────────────────────────────────────────────────────
 
     fun saveFrame(callback: (String?, Exception?) -> Unit) {
@@ -871,6 +895,22 @@ class CameraManager(
                 CameraMetadata.CONTROL_AWB_MODE_AUTO,
             )
         }
+
+        // Scene mode disabled — prevent ISP from overriding manual 3A controls.
+        builder
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_SCENE_MODE,
+                CameraMetadata.CONTROL_SCENE_MODE_DISABLED,
+            )
+
+        // Capture intent: PREVIEW for live scanning, STILL_CAPTURE for photo.
+        val intent =
+            if (captureIntentPreview) {
+                CameraMetadata.CONTROL_CAPTURE_INTENT_PREVIEW
+            } else {
+                CameraMetadata.CONTROL_CAPTURE_INTENT_STILL_CAPTURE
+            }
+        builder.setCaptureRequestOption(CaptureRequest.CONTROL_CAPTURE_INTENT, intent)
 
         // ISP quality settings — fixed for WSI: minimise post-processing artefacts.
         builder

@@ -323,6 +323,17 @@ class EvaCameraPlugin :
                     }
                 }
 
+                "setCaptureIntent" -> {
+                    val preview = call.argument<Boolean>("preview") ?: true
+                    manager.setCaptureIntent(preview) { error ->
+                        if (error != null) {
+                            result.error("CAPTURE_INTENT_FAILED", error.message, null)
+                        } else {
+                            result.success(null)
+                        }
+                    }
+                }
+
                 else -> {
                     result.notImplemented()
                 }

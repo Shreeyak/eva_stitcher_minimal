@@ -4,6 +4,7 @@
 
 - Extracted camera stack into reusable Flutter plugin at `packages/eva_camera/` (Dart + Kotlin/CameraX).
 - App's `MainActivity.kt` reduced to minimal FrameProcessor registration; NativeStitcher stays in-app.
+- Added SCENE_MODE=DISABLED, CAPTURE_INTENT=PREVIEW (with `setCaptureIntent` toggle), ZSL capture mode, and TotalCaptureResult forwarded to FrameProcessor.
 
 ## 2026-03-13 (update 43)
 

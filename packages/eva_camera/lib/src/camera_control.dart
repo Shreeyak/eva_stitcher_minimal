@@ -84,6 +84,12 @@ class CameraControl {
   static Future<void> setIso(int iso) =>
       _method.invokeMethod('setIso', {'iso': iso});
 
+  // ── Capture intent ────────────────────────────────────────────────
+
+  /// Set capture intent: true = PREVIEW (default), false = STILL_CAPTURE.
+  static Future<void> setCaptureIntent({bool preview = true}) =>
+      _method.invokeMethod('setCaptureIntent', {'preview': preview});
+
   // ── Zoom ──────────────────────────────────────────────────────────
 
   static Future<double> getMinZoomRatio() async {
