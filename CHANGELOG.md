@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-13 (typed camera payloads)
+
+- `CameraControl.startCamera()`, `getResolution()`, and `setCaptureFormat()` now return typed `CameraResolutionInfo` (`CameraStartInfo` alias for startup) instead of raw `Map<String, dynamic>`.
+- `CameraControl.dumpActiveCameraSettings()` now returns typed `CameraSettingsDumpInfo`; app call sites were updated to consume strongly-typed fields.
+- Plugin docs updated to reflect typed API contracts for startup/resolution/dump payloads.
+
 ## 2026-03-13 (StillCaptureProcessor: zero-copy ImageProxy dispatch)
 
 - Replaced `StillFrame` sealed class (ByteArray copies) with direct `ImageProxy` dispatch in `StillCaptureProcessor.onStillCapture(imageProxy, captureResult)` — no copies before the processor runs.

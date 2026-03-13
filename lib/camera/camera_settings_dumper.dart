@@ -7,10 +7,9 @@ class CameraSettingsDumper {
   static Future<void> dumpAndNotify(BuildContext context) async {
     try {
       final result = await CameraControl.dumpActiveCameraSettings();
-      final filePath = result['filePath'] as String? ?? '';
-      final keyCount = (result['keyCount'] as num?)?.toInt() ?? 0;
-      final supportedKeyCount =
-          (result['supportedKeyCount'] as num?)?.toInt() ?? 0;
+      final filePath = result.filePath;
+      final keyCount = result.keyCount;
+      final supportedKeyCount = result.supportedKeyCount;
 
       debugPrint('=== Camera settings dumped ===');
       debugPrint('Key count: $keyCount (supported: $supportedKeyCount)');

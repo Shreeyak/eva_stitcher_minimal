@@ -93,8 +93,7 @@ final granted = await CameraControl.requestPermission();
 if (!granted) return;
 
 final info = await CameraControl.startCamera();
-// info keys: captureWidth, captureHeight, analysisWidth, analysisHeight,
-//            isoRange, exposureTimeRangeNs, minZoomRatio, maxZoomRatio, ...
+// CameraStartInfo fields: captureWidth, captureHeight, analysisWidth, analysisHeight
 ```
 
 ### 3. Embed the preview surface
@@ -200,8 +199,10 @@ All methods are static on `CameraControl`. Returns are `Future<void>` unless not
 
 | Method | Returns | Description |
 |---|---|---|
-| `getResolution()` | `Map` | Current capture + analysis resolutions |
-| `dumpActiveCameraSettings()` | `Map` | All CameraCharacteristics + active values |
+| `startCamera()` | `CameraStartInfo` | Starts camera and returns startup resolution payload |
+| `getResolution()` | `CameraResolutionInfo` | Current capture + analysis resolutions |
+| `setCaptureFormat(CaptureFormat)` | `CameraResolutionInfo` | Switches capture format and returns updated resolutions |
+| `dumpActiveCameraSettings()` | `CameraSettingsDumpInfo` | Dump path + key counts for the generated settings file |
 
 ---
 

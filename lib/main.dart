@@ -172,10 +172,10 @@ class _CameraScreenState extends State<CameraScreen> {
       final info = await CameraControl.startCamera();
       if (!mounted) return;
 
-      final cw = info['captureWidth'] ?? '--';
-      final ch = info['captureHeight'] ?? '--';
-      final aw = info['analysisWidth'] ?? '--';
-      final ah = info['analysisHeight'] ?? '--';
+      final cw = info.captureWidth?.toString() ?? '--';
+      final ch = info.captureHeight?.toString() ?? '--';
+      final aw = info.analysisWidth?.toString() ?? '--';
+      final ah = info.analysisHeight?.toString() ?? '--';
 
       setState(() {
         _cameraStarted = true;

@@ -1,6 +1,12 @@
 import 'package:flutter/services.dart';
 
-import 'camera_state.dart' show CaptureFormat, CaptureIntent;
+import 'camera_state.dart'
+    show
+        CameraResolutionInfo,
+        CameraSettingsDumpInfo,
+        CameraStartInfo,
+        CaptureFormat,
+        CaptureIntent;
 
 // ── Platform channel helper ─────────────────────────────────────────────
 
@@ -13,9 +19,9 @@ class CameraControl {
     return granted ?? false;
   }
 
-  static Future<Map<String, dynamic>> startCamera() async {
+  static Future<CameraStartInfo> startCamera() async {
     final result = await _method.invokeMethod<Map>('startCamera');
-    return Map<String, dynamic>.from(result ?? {});
+    return CameraStartInfo.fromMap(result ?? const {});
   }
 
   static Future<void> stopCamera() => _method.invokeMethod('stopCamera');
@@ -30,18 +36,18 @@ class CameraControl {
 
   /// Switch ImageCapture output format (triggers camera rebind).
   /// Returns updated resolution info.
-  static Future<Map<String, dynamic>> setCaptureFormat(
+  static Future<CameraResolutionInfo> setCaptureFormat(
     CaptureFormat format,
   ) async {
     final result = await _method.invokeMethod<Map>('setCaptureFormat', {
       'format': format.name,
     });
-    return Map<String, dynamic>.from(result ?? {});
+    return CameraResolutionInfo.fromMap(result ?? const {});
   }
 
-  static Future<Map<String, dynamic>> dumpActiveCameraSettings() async {
+  static Future<CameraSettingsDumpInfo> dumpActiveCameraSettings() async {
     final result = await _method.invokeMethod<Map>('dumpActiveCameraSettings');
-    return Map<String, dynamic>.from(result ?? {});
+    return CameraSettingsDumpInfo.fromMap(result ?? const {});
   }
 
   // ── White balance ──────────────────────────────────────────────────
@@ -140,9 +146,9 @@ class CameraControl {
 
   // ── Info ──────────────────────────────────────────────────────────
 
-  static Future<Map<String, dynamic>> getResolution() async {
+  static Future<CameraResolutionInfo> getResolution() async {
     final result = await _method.invokeMethod<Map>('getResolution');
-    return Map<String, dynamic>.from(result ?? {});
+    return CameraResolutionInfo.fromMap(result ?? const {});
   }
 
   /// Broadcast stream of status events pushed from Kotlin every ~500 ms.

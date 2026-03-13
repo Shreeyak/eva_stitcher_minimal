@@ -22,6 +22,87 @@ enum CaptureIntent { preview, stillCapture }
 /// ImageCapture output format — switching triggers a camera rebind.
 enum CaptureFormat { yuv, jpeg }
 
+// ─── Structured platform payloads ─────────────────────────────────────────────
+
+/// Resolution payload returned by camera startup/rebind queries.
+class CameraResolutionInfo {
+  const CameraResolutionInfo({
+    this.captureWidth,
+    this.captureHeight,
+    this.analysisWidth,
+    this.analysisHeight,
+  });
+
+  final int? captureWidth;
+  final int? captureHeight;
+  final int? analysisWidth;
+  final int? analysisHeight;
+
+  factory CameraResolutionInfo.fromMap(Map<dynamic, dynamic> map) {
+    int? asInt(Object? v) => (v as num?)?.toInt();
+    return CameraResolutionInfo(
+      captureWidth: asInt(map['captureWidth']),
+      captureHeight: asInt(map['captureHeight']),
+      analysisWidth: asInt(map['analysisWidth']),
+      analysisHeight: asInt(map['analysisHeight']),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    if (captureWidth != null) 'captureWidth': captureWidth,
+    if (captureHeight != null) 'captureHeight': captureHeight,
+    if (analysisWidth != null) 'analysisWidth': analysisWidth,
+    if (analysisHeight != null) 'analysisHeight': analysisHeight,
+  };
+}
+
+/// Startup payload returned by [CameraControl.startCamera].
+class CameraStartInfo extends CameraResolutionInfo {
+  const CameraStartInfo({
+    super.captureWidth,
+    super.captureHeight,
+    super.analysisWidth,
+    super.analysisHeight,
+  });
+
+  factory CameraStartInfo.fromMap(Map<dynamic, dynamic> map) {
+    final info = CameraResolutionInfo.fromMap(map);
+    return CameraStartInfo(
+      captureWidth: info.captureWidth,
+      captureHeight: info.captureHeight,
+      analysisWidth: info.analysisWidth,
+      analysisHeight: info.analysisHeight,
+    );
+  }
+}
+
+/// Result payload returned by dumping active camera settings to disk.
+class CameraSettingsDumpInfo {
+  const CameraSettingsDumpInfo({
+    this.filePath = '',
+    this.keyCount = 0,
+    this.supportedKeyCount = 0,
+  });
+
+  final String filePath;
+  final int keyCount;
+  final int supportedKeyCount;
+
+  factory CameraSettingsDumpInfo.fromMap(Map<dynamic, dynamic> map) {
+    return CameraSettingsDumpInfo(
+      filePath: map['filePath'] as String? ?? '',
+      keyCount: (map['keyCount'] as num?)?.toInt() ?? 0,
+      supportedKeyCount: (map['supportedKeyCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'filePath': filePath,
+    'keyCount': keyCount,
+    'supportedKeyCount': supportedKeyCount,
+  };
+}
+
 // ─── CameraValues ─────────────────────────────────────────────────────────────
 
 /// Current user-controlled camera values.
