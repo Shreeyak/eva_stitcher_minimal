@@ -757,11 +757,18 @@ class CameraManager(
     /**
      * Trigger a full-resolution still capture. The [ImageProxy] is delivered directly to
      * [stillCaptureProcessor] on the camera executor thread — no pixel data crosses the
-     * MethodChannel. The processor is responsible for calling [ImageProxy.close].
+     * MethodChannel. [ImageProxy.close] is always called here in a finally block.
      *
+     * Can also be called directly from native Kotlin (e.g. by the stitcher) with [save]=false.
+     *
+     * @param save True when the user requested a photo save to disk (signal from Dart).
+     *   False for internal stitcher-triggered captures.
      * @param callback Invoked on the main thread when capture completes or fails.
      */
-    fun captureImage(callback: (Exception?) -> Unit) {
+    fun captureImage(
+        save: Boolean,
+        callback: (Exception?) -> Unit,
+    ) {
         val capture =
             imageCapture ?: return callback(IllegalStateException("Camera not ready"))
         val executor =
@@ -772,13 +779,15 @@ class CameraManager(
             executor,
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(imageProxy: ImageProxy) {
-                    val processor = stillCaptureProcessor
-                    if (processor != null) {
-                        processor.onStillCapture(imageProxy, latestCaptureResult)
-                        // imageProxy.close() is the processor's responsibility
-                    } else {
+                    try {
+                        val processor = stillCaptureProcessor
+                        if (processor != null) {
+                            processor.onStillCapture(imageProxy, latestCaptureResult, save)
+                        } else {
+                            Log.w(TAG, "captureImage: no StillCaptureProcessor registered")
+                        }
+                    } finally {
                         imageProxy.close()
-                        Log.w(TAG, "captureImage: no StillCaptureProcessor registered")
                     }
                     mainHandler.post { callback(null) }
                 }

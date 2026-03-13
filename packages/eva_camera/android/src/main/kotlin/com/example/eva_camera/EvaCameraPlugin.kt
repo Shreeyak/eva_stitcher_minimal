@@ -334,7 +334,8 @@ class EvaCameraPlugin :
                 }
 
                 "captureImage" -> {
-                    manager.captureImage { error ->
+                    val save = call.argument<Boolean>("save") ?: false
+                    manager.captureImage(save) { error ->
                         if (error != null) {
                             result.error("CAPTURE_IMAGE_FAILED", error.message, null)
                         } else {
