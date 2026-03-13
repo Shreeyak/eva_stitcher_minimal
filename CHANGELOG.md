@@ -2,9 +2,9 @@
 
 ## 2026-03-13 (init-time resolution selection)
 
+- `EvaCameraPlugin` now exposes separate registration methods: `setPhotoCaptureProcessor()` and `setStitchFrameProcessor()`.
 - Added optional `startCamera` init args for selecting target resolutions: `captureWidth`, `captureHeight`, `analysisWidth`, `analysisHeight`.
 - Resolution overrides now persist in `CameraManager` and are used for both first bind and subsequent rebinds (for example after `setCaptureFormat`).
-- Plugin docs updated with usage and pairing rules (width/height must be provided together per use case).
 
 ## 2026-03-13 (camera startup contract unification)
 

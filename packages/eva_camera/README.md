@@ -20,13 +20,14 @@ CameraControl  ──────►  EvaCameraPlugin              NativeStitche
                              └─ ImageAnalysis (960×1280 YUV, ~30 fps)
                                     │                       │
                                     ▼                       ▼
-                             FrameProcessor         StillCaptureProcessor
+                             FrameProcessor      PhotoCapture/StitchFrame processors
 ```
 
 Three CameraX use cases run simultaneously:
 
 - Preview — device default, output to `PreviewView` PlatformView.
-- ImageCapture — 4208×3120, delivered to `StillCaptureProcessor`.
+- ImageCapture — 4208×3120, delivered to either `PhotoCaptureProcessor` or
+    `StitchFrameProcessor` based on capture entrypoint.
 - ImageAnalysis — 1280×960, delivered to `FrameProcessor` (YUV, ~30 fps).
 
 ---
@@ -41,7 +42,8 @@ Implement the native interfaces and register them **before** `startCamera` is ca
 // MainActivity.kt
 import com.example.eva_camera.EvaCameraPlugin
 import com.example.eva_camera.FrameProcessor
-import com.example.eva_camera.StillCaptureProcessor
+import com.example.eva_camera.PhotoCaptureProcessor
+import com.example.eva_camera.StitchFrameProcessor
 import com.example.eva_camera.StillFrameSaver
 
 class MainActivity : FlutterActivity() {
@@ -61,22 +63,27 @@ class MainActivity : FlutterActivity() {
             }
         })
 
-        EvaCameraPlugin.setStillCaptureProcessor(object : StillCaptureProcessor {
-            override fun onStillCapture(
+        EvaCameraPlugin.setPhotoCaptureProcessor(object : PhotoCaptureProcessor {
+            override fun onPhotoCapture(
                 imageProxy: ImageProxy,
                 captureResult: TotalCaptureResult?,
-                save: Boolean,
             ) {
-                if (save) {
-                    // photo mode: persist to gallery
-                    StillFrameSaver.saveToMediaStore(applicationContext, imageProxy)
-                } else {
-                    // stitcher mode: extract planes for registration + blend
-                    val yBuf  = imageProxy.planes[0].buffer  // luma, zero-copy ByteBuffer
-                    val uBuf  = imageProxy.planes[1].buffer
-                    val vBuf  = imageProxy.planes[2].buffer
-                    // NativeStitcher.addFrame(yBuf, uBuf, vBuf, ...)
-                }
+                // photo mode: persist to gallery
+                StillFrameSaver.saveToMediaStore(applicationContext, imageProxy)
+                // ⚠ DO NOT call imageProxy.close() — CameraManager handles it in a finally block.
+            }
+        })
+
+        EvaCameraPlugin.setStitchFrameProcessor(object : StitchFrameProcessor {
+            override fun onStitchFrame(
+                imageProxy: ImageProxy,
+                captureResult: TotalCaptureResult?,
+            ) {
+                // stitcher mode: extract planes for registration + blend
+                val yBuf  = imageProxy.planes[0].buffer  // luma, zero-copy ByteBuffer
+                val uBuf  = imageProxy.planes[1].buffer
+                val vBuf  = imageProxy.planes[2].buffer
+                // NativeStitcher.addFrame(yBuf, uBuf, vBuf, ...)
                 // ⚠ DO NOT call imageProxy.close() — CameraManager handles it in a finally block.
             }
         })
@@ -121,29 +128,29 @@ AndroidView(
 ### Signal flow — photo save (triggered from Dart)
 
 ```text
-Dart: CameraControl.captureImage(save: true)
-  → MethodChannel: {method: captureImage, save: true}
-  → CameraManager.captureImage(save=true, callback)
-  → StillCaptureProcessor.onStillCapture(imageProxy, captureResult, save=true)
+Dart: CameraControl.capturePhoto()
+    → MethodChannel: {method: capturePhoto}
+    → CameraManager.capturePhoto(callback)
+    → PhotoCaptureProcessor.onPhotoCapture(imageProxy, captureResult)
   → StillFrameSaver.saveToMediaStore(context, imageProxy)
   → callback(null)  [main thread]
 ```
 
 ```dart
 // Dart — photo button handler
-await CameraControl.captureImage(save: true);
+await CameraControl.capturePhoto();
 ```
 
 ### Signal flow — stitcher capture (triggered from native Kotlin)
 
 ```text
-NativeStitcher (Kotlin): cameraManager.captureImage(save=false, callback)
-  → StillCaptureProcessor.onStillCapture(imageProxy, captureResult, save=false)
+NativeStitcher (Kotlin): cameraManager.captureStitchFrame(callback)
+    → StitchFrameProcessor.onStitchFrame(imageProxy, captureResult)
   → extract Y/RGB planes → NativeStitcher.addFrame(...)
   → callback(null)  [main thread]
 ```
 
-The native stitcher has a reference to `CameraManager` and calls `captureImage` directly — no
+The native stitcher has a reference to `CameraManager` and calls `captureStitchFrame` directly — no
 MethodChannel round-trip to Dart.
 
 ### `ImageProxy` lifetime
@@ -160,7 +167,8 @@ All methods are static on `CameraControl`. Returns are `Future<void>` unless not
 
 ### Capture
 
-- `captureImage({save: false})` — Trigger full-resolution still capture.
+- `capturePhoto()` — Trigger full-resolution still capture for photo-save flows.
+- `captureStitchFrame()` — Trigger full-resolution still capture for stitching flows.
 - `setCaptureFormat(CaptureFormat)` — Switch between `yuv` and `jpeg` (triggers rebind).
 - `setCaptureIntent(CaptureIntent)` — `preview` or `stillCapture` hint to camera pipeline.
 
@@ -218,7 +226,8 @@ CameraControl.events.receiveBroadcastStream().listen((data) {
 
 ## `imageProxy.close()` contract
 
-- `StillCaptureProcessor.onStillCapture` → **`CameraManager`** (finally block)
+- `PhotoCaptureProcessor.onPhotoCapture` → **`CameraManager`** (finally block)
+- `StitchFrameProcessor.onStitchFrame` → **`CameraManager`** (finally block)
 - `FrameProcessor.processFrame` → **`CameraManager`** (finally block in `processFrame`)
 - No processor registered → **`CameraManager`** (immediate close + warning log)
 

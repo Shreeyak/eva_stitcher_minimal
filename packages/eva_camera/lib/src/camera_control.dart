@@ -59,13 +59,16 @@ class CameraControl {
 
   static Future<void> stopCamera() => _method.invokeMethod('stopCamera');
 
-  /// Trigger a full-resolution still capture. The frame is delivered directly to the
-  /// native StillCaptureProcessor — no image data crosses the MethodChannel.
-  ///
-  /// [save] signals the native layer to persist the frame to disk (photo mode).
-  /// When false, the processor handles the frame for stitching without saving.
-  static Future<void> captureImage({bool save = false}) =>
-      _method.invokeMethod('captureImage', {'save': save});
+  /// Trigger a full-resolution still capture intended for user-facing photo save flows.
+  /// The frame is delivered directly to the native PhotoCaptureProcessor — no image
+  /// data crosses the MethodChannel.
+  static Future<void> capturePhoto() => _method.invokeMethod('capturePhoto');
+
+  /// Trigger a full-resolution still capture intended for stitching flows.
+  /// The frame is delivered directly to the native StitchFrameProcessor — no image
+  /// data crosses the MethodChannel.
+  static Future<void> captureStitchFrame() =>
+      _method.invokeMethod('captureStitchFrame');
 
   /// Switch ImageCapture output format (triggers camera rebind).
   /// Returns updated resolution info.

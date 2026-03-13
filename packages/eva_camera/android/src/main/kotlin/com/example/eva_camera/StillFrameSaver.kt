@@ -24,7 +24,7 @@ import java.util.Locale
  * - JPEG frames are saved as JPEG (planes[0] bytes written directly).
  *
  * All functions are blocking — call from a background thread, e.g. inside
- * [StillCaptureProcessor.onStillCapture]. The caller retains ownership of [imageProxy]
+ * [PhotoCaptureProcessor.onPhotoCapture]. The caller retains ownership of [imageProxy]
  * and must still call [ImageProxy.close] after this returns.
  */
 object StillFrameSaver {

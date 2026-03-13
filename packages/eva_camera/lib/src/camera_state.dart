@@ -3,10 +3,7 @@
 //   CameraValues  — user-controllable current values (changes on every slider drag)
 //   CameraRanges  — device capabilities (set once at startup, immutable after)
 //   CameraInfo    — read-only telemetry from the EventChannel
-//   CameraCallbacks — bundled action callbacks for widgets
 //   CameraSettingType — shared identifier for adjustable camera controls
-
-import 'package:flutter/foundation.dart' show VoidCallback;
 
 // ─── CameraSettingType enum ────────────────────────────────────────────────────────
 
@@ -252,28 +249,4 @@ class CameraInfo {
       analysisResolution: analysisResolution ?? this.analysisResolution,
     );
   }
-}
-
-// ─── CameraCallbacks ──────────────────────────────────────────────────────────
-
-/// Bundled camera-action callbacks passed to child widgets.
-///
-/// Grouping them here keeps widget constructors slim — widgets accept a single
-/// [CameraCallbacks] instead of 7+ individual function parameters.
-class CameraCallbacks {
-  const CameraCallbacks({
-    required this.onIsoChanged,
-    required this.onExposureTimeNsChanged,
-    required this.onFocusChanged,
-    required this.onZoomChanged,
-    required this.onWbLockChanged,
-    required this.onToggleAf,
-  });
-
-  final void Function(int iso) onIsoChanged;
-  final void Function(int ns) onExposureTimeNsChanged;
-  final void Function(double dist) onFocusChanged;
-  final void Function(double ratio) onZoomChanged;
-  final void Function(bool locked) onWbLockChanged;
-  final VoidCallback onToggleAf;
 }

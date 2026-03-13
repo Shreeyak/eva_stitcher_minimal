@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:eva_camera/eva_camera.dart';
+import '../camera/camera_callbacks.dart';
 import 'camera_ruler_dial/camera_dial_presets.dart';
 import 'camera_ruler_dial/camera_ruler_dial.dart';
 

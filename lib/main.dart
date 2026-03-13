@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'theme/material_theme_salmon.dart';
 import 'theme/theme_util.dart';
 import 'package:eva_camera/eva_camera.dart';
+import 'camera/camera_callbacks.dart';
 import 'widgets/bottom_info_bar.dart';
 import 'widgets/interactive_bottom_bar.dart';
 import 'widgets/canvas_view.dart';

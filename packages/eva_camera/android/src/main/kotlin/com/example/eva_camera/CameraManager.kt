@@ -61,8 +61,11 @@ class CameraManager(
     /** Optional frame processor — set by the host app via [EvaCameraPlugin.setFrameProcessor]. */
     var frameProcessor: FrameProcessor? = null
 
-    /** Optional still-capture processor — set via [EvaCameraPlugin.setStillCaptureProcessor]. */
-    var stillCaptureProcessor: StillCaptureProcessor? = null
+    /** Optional photo processor — set via [EvaCameraPlugin.setPhotoCaptureProcessor]. */
+    var photoCaptureProcessor: PhotoCaptureProcessor? = null
+
+    /** Optional stitch-frame processor — set via [EvaCameraPlugin.setStitchFrameProcessor]. */
+    var stitchFrameProcessor: StitchFrameProcessor? = null
 
     // ── Camera state ────────────────────────────────────────────────────
     private var camera: Camera? = null
@@ -697,21 +700,54 @@ class CameraManager(
         }
     }
 
-    // ── Capture image ────────────────────────────────────────────────────
+    // ── Still capture ────────────────────────────────────────────────────
+
+    /**
+     * Trigger a full-resolution still capture for photo-save flows.
+     */
+    fun capturePhoto(callback: (Exception?) -> Unit) {
+        captureStill(
+            onCapture = { imageProxy, captureResult ->
+                val processor = photoCaptureProcessor
+                if (processor != null) {
+                    processor.onPhotoCapture(imageProxy, captureResult)
+                } else {
+                    Log.w(TAG, "capturePhoto: no PhotoCaptureProcessor registered")
+                }
+            },
+            callback = callback,
+        )
+    }
+
+    /**
+     * Trigger a full-resolution still capture for stitching flows.
+     */
+    fun captureStitchFrame(callback: (Exception?) -> Unit) {
+        captureStill(
+            onCapture = { imageProxy, captureResult ->
+                val processor = stitchFrameProcessor
+                if (processor != null) {
+                    processor.onStitchFrame(imageProxy, captureResult)
+                } else {
+                    Log.w(TAG, "captureStitchFrame: no StitchFrameProcessor registered")
+                }
+            },
+            callback = callback,
+        )
+    }
 
     /**
      * Trigger a full-resolution still capture. The [ImageProxy] is delivered directly to
-     * [stillCaptureProcessor] on the camera executor thread — no pixel data crosses the
+     * a dedicated native processor on the camera executor thread — no pixel data crosses the
      * MethodChannel. [ImageProxy.close] is always called here in a finally block.
      *
-     * Can also be called directly from native Kotlin (e.g. by the stitcher) with [save]=false.
+     * Can be called from Dart or directly from native Kotlin (for example by the stitcher).
      *
-     * @param save True when the user requested a photo save to disk (signal from Dart).
-     *   False for internal stitcher-triggered captures.
+     * @param onCapture Processor callback executed on the camera executor thread.
      * @param callback Invoked on the main thread when capture completes or fails.
      */
-    fun captureImage(
-        save: Boolean,
+    private fun captureStill(
+        onCapture: (ImageProxy, TotalCaptureResult?) -> Unit,
         callback: (Exception?) -> Unit,
     ) {
         val capture =
@@ -725,12 +761,7 @@ class CameraManager(
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(imageProxy: ImageProxy) {
                     try {
-                        val processor = stillCaptureProcessor
-                        if (processor != null) {
-                            processor.onStillCapture(imageProxy, latestCaptureResult, save)
-                        } else {
-                            Log.w(TAG, "captureImage: no StillCaptureProcessor registered")
-                        }
+                        onCapture(imageProxy, latestCaptureResult)
                     } finally {
                         imageProxy.close()
                     }
@@ -738,7 +769,7 @@ class CameraManager(
                 }
 
                 override fun onError(exception: ImageCaptureException) {
-                    Log.e(TAG, "captureImage failed", exception)
+                    Log.e(TAG, "captureStill failed", exception)
                     mainHandler.post { callback(exception) }
                 }
             },

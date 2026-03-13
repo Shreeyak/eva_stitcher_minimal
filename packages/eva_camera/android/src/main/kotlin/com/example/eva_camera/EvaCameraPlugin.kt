@@ -27,7 +27,9 @@ class EvaCameraPlugin :
 
         @Volatile private var frameProcessor: FrameProcessor? = null
 
-        @Volatile private var stillCaptureProcessor: StillCaptureProcessor? = null
+        @Volatile private var photoCaptureProcessor: PhotoCaptureProcessor? = null
+
+        @Volatile private var stitchFrameProcessor: StitchFrameProcessor? = null
 
         /** Register a [FrameProcessor] to receive every ImageAnalysis frame. */
         @JvmStatic
@@ -35,10 +37,16 @@ class EvaCameraPlugin :
             frameProcessor = processor
         }
 
-        /** Register a [StillCaptureProcessor] to receive full-resolution still captures. */
+        /** Register a [PhotoCaptureProcessor] for user-triggered photo captures. */
         @JvmStatic
-        fun setStillCaptureProcessor(processor: StillCaptureProcessor?) {
-            stillCaptureProcessor = processor
+        fun setPhotoCaptureProcessor(processor: PhotoCaptureProcessor?) {
+            photoCaptureProcessor = processor
+        }
+
+        /** Register a [StitchFrameProcessor] for stitch-frame captures. */
+        @JvmStatic
+        fun setStitchFrameProcessor(processor: StitchFrameProcessor?) {
+            stitchFrameProcessor = processor
         }
     }
 
@@ -92,7 +100,8 @@ class EvaCameraPlugin :
         val manager =
             CameraManager(activity, lifecycleOwner).also {
                 it.frameProcessor = frameProcessor
-                it.stillCaptureProcessor = stillCaptureProcessor
+                it.photoCaptureProcessor = photoCaptureProcessor
+                it.stitchFrameProcessor = stitchFrameProcessor
             }
         cameraManager = manager
 
@@ -291,11 +300,20 @@ class EvaCameraPlugin :
                     }
                 }
 
-                "captureImage" -> {
-                    val save = call.argument<Boolean>("save") ?: false
-                    manager.captureImage(save) { error ->
+                "capturePhoto" -> {
+                    manager.capturePhoto { error ->
                         if (error != null) {
-                            result.error("CAPTURE_IMAGE_FAILED", error.message, null)
+                            result.error("CAPTURE_PHOTO_FAILED", error.message, null)
+                        } else {
+                            result.success(null)
+                        }
+                    }
+                }
+
+                "captureStitchFrame" -> {
+                    manager.captureStitchFrame { error ->
+                        if (error != null) {
+                            result.error("CAPTURE_STITCH_FRAME_FAILED", error.message, null)
                         } else {
                             result.success(null)
                         }
