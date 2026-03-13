@@ -1,11 +1,5 @@
 # Changelog
 
-## 2026-03-13 (init-time resolution selection)
-
-- `EvaCameraPlugin` now exposes separate registration methods: `setPhotoCaptureProcessor()` and `setStitchFrameProcessor()`.
-- Added optional `startCamera` init args for selecting target resolutions: `captureWidth`, `captureHeight`, `analysisWidth`, `analysisHeight`.
-- Resolution overrides now persist in `CameraManager` and are used for both first bind and subsequent rebinds (for example after `setCaptureFormat`).
-
 ## 2026-03-13 (camera startup contract unification)
 
 - `startCamera()` now returns capability ranges (`minFocusDistance`, zoom min/max, exposure range, ISO range) together with resolution in `CameraStartInfo`.

@@ -67,5 +67,6 @@ android {
 flutter { source = "../.." }
 
 dependencies {
+    implementation("androidx.camera:camera-core:1.5.3")
     implementation(project(":opencv"))
 }
