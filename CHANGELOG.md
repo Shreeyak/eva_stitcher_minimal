@@ -1,35 +1,5 @@
 # Changelog
 
-## 2026-03-13 (camera startup contract unification)
-
-- `startCamera()` now returns capability ranges (`minFocusDistance`, zoom min/max, exposure range, ISO range) together with resolution in `CameraStartInfo`.
-- Removed deprecated per-range calls from plugin/public API and channel wiring: `getIsoRange`, `getExposureTimeRangeNs`, `getMinFocusDistance`, `getMinZoomRatio`, `getMaxZoomRatio`.
-- `lib/main.dart` now builds `CameraRanges` directly from the single `startCamera()` payload (no extra MethodChannel round-trips).
-
-## 2026-03-13 (typed camera payloads)
-
-- `CameraControl.startCamera()`, `getResolution()`, and `setCaptureFormat()` now return typed `CameraResolutionInfo` (`CameraStartInfo` alias for startup) instead of raw `Map<String, dynamic>`.
-- `CameraControl.dumpActiveCameraSettings()` now returns typed `CameraSettingsDumpInfo`; app call sites were updated to consume strongly-typed fields.
-- Plugin docs updated to reflect typed API contracts for startup/resolution/dump payloads.
-
-## 2026-03-13 (StillCaptureProcessor: zero-copy ImageProxy dispatch)
-
-- Replaced `StillFrame` sealed class (ByteArray copies) with direct `ImageProxy` dispatch in `StillCaptureProcessor.onStillCapture(imageProxy, captureResult)` — no copies before the processor runs.
-- `CameraManager.captureImage()` simplified: no byte extraction, passes raw `ImageProxy`; processor calls `imageProxy.close()`.
-- `StillFrameSaver.saveToMediaStore(context, imageProxy)` reads `planes[].buffer` in-place (ByteBuffer, no intermediate array); deleted `StillFrame.kt`.
-- `EvaCameraPlugin` gains `setStillCaptureProcessor()` companion; `captureImage` MethodChannel returns `null` (no data); `saveFrame` MethodChannel removed.
-- Dart `CameraControl.captureImage()` returns `Future<void>`; `saveFrame()` removed.
-
-## 2026-03-13 (cam-plugin code review fixes)
-
-- Fixed `setCaptureFormat()` to save/restore `captureFormatYuv` on rebind failure (same rollback pattern as `setCaptureIntent`).
-- Added `@Volatile` to `EvaCameraPlugin.frameProcessor` companion field to prevent stale-null reads on the camera executor thread.
-- Added `stopFpsTimer()` before `provider.unbindAll()` in `rebindUseCases()` to prevent stale FPS readings during format switches.
-- Added `setAeEnabled`, `getExposureOffsetStep`, `getExposureOffsetRange`, `setExposureOffset` to Dart `CameraControl` (were wired in Kotlin but missing from the plugin's Dart API).
-- Added explicit `setCaptureIntent` validation in Kotlin to reject unknown intent strings rather than silently mapping to STILL_CAPTURE.
-- Added TODO in `MainActivity.processFrame` to track the intentional gap of forwarding `TotalCaptureResult` to `NativeStitcher` (needed for Phase 2 exposure-compensated blending).
-- Documented `captureImage()` memory impact (~19 MB per YUV capture at 4208×3120; peak >50 MB).
-
 ## 2026-03-14
 
 - Extracted camera stack into reusable Flutter plugin at `packages/eva_camera/` (Dart + Kotlin/CameraX).
