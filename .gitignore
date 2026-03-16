@@ -12,8 +12,9 @@ scripts/tmp_files/*
 !scripts/tmp_files/.gitkeep
 .vscode/
 /*.png
-android/.kotlin/
-android/.gradle/
+android/.kotlin
+android/.gradle
+android/app/bin
 packages/eva_camera/android/.gradle/
 
 # Miscellaneous
