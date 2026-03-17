@@ -37,6 +37,10 @@ public:
     // Returns empty vector if canvas is empty.
     std::vector<uint8_t> getCanvasPreview(int maxDim);
 
+    // Saves the full-resolution canvas to Pictures/EvaWSI directory as a tiled PNG set.
+    // Returns 0 on success, -1 on error (e.g., invalid directory, write failure).
+    int saveCanvasToDisk(const std::string& outputDir);
+
     void reset();
     void startScanning();
     void stopScanning();

@@ -26,6 +26,7 @@ class InteractiveBottomBar extends StatelessWidget {
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
   final VoidCallback onExport;
+  final VoidCallback onSaveCanvas;
   final ValueChanged<CameraSettingType?> onSettingChipTap;
 
   const InteractiveBottomBar({
@@ -44,6 +45,7 @@ class InteractiveBottomBar extends StatelessWidget {
     required this.onToggleSettings,
     required this.onReset,
     required this.onExport,
+    required this.onSaveCanvas,
     required this.onSettingChipTap,
   });
 
@@ -74,6 +76,7 @@ class InteractiveBottomBar extends StatelessWidget {
                     onToggleSettings: onToggleSettings,
                     onReset: onReset,
                     onExport: onExport,
+                    onSaveCanvas: onSaveCanvas,
                     onToggleDebugOverlay: onToggleDebugOverlay,
                   ),
                 ),
@@ -114,6 +117,7 @@ class _MainActionBar extends StatelessWidget {
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
   final VoidCallback onExport;
+  final VoidCallback onSaveCanvas;
   final VoidCallback onToggleDebugOverlay;
 
   const _MainActionBar({
@@ -126,6 +130,7 @@ class _MainActionBar extends StatelessWidget {
     required this.onToggleSettings,
     required this.onReset,
     required this.onExport,
+    required this.onSaveCanvas,
     required this.onToggleDebugOverlay,
   });
 
@@ -164,19 +169,26 @@ class _MainActionBar extends StatelessWidget {
             onTap: onReset,
           ),
           const SizedBox(width: 32),
-          BottomBarActionButton(
-            icon: Icons.download_outlined,
-            label: 'EXPORT',
-            isDisabled: !canExport,
-            onTap: canExport ? onExport : null,
-          ),
-          const SizedBox(width: 32),
-          BottomBarActionButton(
-            icon: Icons.bug_report_outlined,
-            label: 'DEBUG',
-            isActive: showDebugOverlay,
-            onTap: onToggleDebugOverlay,
-          ),
+           BottomBarActionButton(
+             icon: Icons.download_outlined,
+             label: 'EXPORT',
+             isDisabled: !canExport,
+             onTap: canExport ? onExport : null,
+           ),
+           const SizedBox(width: 32),
+           BottomBarActionButton(
+             icon: Icons.save_outlined,
+             label: 'SAVE',
+             isDisabled: !canExport,
+             onTap: canExport ? onSaveCanvas : null,
+           ),
+           const SizedBox(width: 32),
+           BottomBarActionButton(
+             icon: Icons.bug_report_outlined,
+             label: 'DEBUG',
+             isActive: showDebugOverlay,
+             onTap: onToggleDebugOverlay,
+           ),
 
           const Spacer(),
 

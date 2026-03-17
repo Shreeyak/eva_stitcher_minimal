@@ -376,3 +376,41 @@ void Canvas::reset() {
     _minX = 0.f; _minY = 0.f; _maxX = -1.f; _maxY = -1.f;
     LOGI("Canvas::reset");
 }
+
+// ── saveAllTilesToDisk ─────────────────────────────────────────────────────
+
+int Canvas::saveAllTilesToDisk(const std::string& outputDir) {
+    std::unique_lock lock(_canvasMutex);
+    
+    if (_empty || _tiles.empty()) {
+        LOGI("saveAllTilesToDisk: canvas is empty, nothing to save");
+        return 0;
+    }
+
+    // Ensure output directory exists
+    int ret = mkdir(outputDir.c_str(), 0755);
+    if (ret != 0 && errno != EEXIST) {
+        LOGI("saveAllTilesToDisk: failed to create directory %s", outputDir.c_str());
+        return -1;
+    }
+
+    int savedCount = 0;
+    int errorCount = 0;
+
+    for (auto& [key, tile] : _tiles) {
+        if (!tile || tile->pixels.empty()) continue;
+
+        // Save tile pixel data
+        std::string tilePath = outputDir + "/tile_" + std::to_string(key.col) + "_" + std::to_string(key.row) + ".png";
+        bool ok = cv::imwrite(tilePath, tile->pixels);
+        if (!ok) {
+            LOGI("Failed to save tile (%d,%d) to %s", key.col, key.row, tilePath.c_str());
+            errorCount++;
+        } else {
+            savedCount++;
+        }
+    }
+
+    LOGI("saveAllTilesToDisk: saved %d tiles, %d errors to %s", savedCount, errorCount, outputDir.c_str());
+    return errorCount > 0 ? -1 : 0;
+}

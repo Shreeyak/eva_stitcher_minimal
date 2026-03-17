@@ -118,4 +118,23 @@ Java_com_example_eva_1minimal_1demo_NativeStitcher_stopScanning(
     if (gEngine) gEngine->stopScanning();
 }
 
+// ── saveCanvasToDisk ──────────────────────────────────────────────────────
+
+JNIEXPORT jint JNICALL
+Java_com_example_eva_1minimal_1demo_NativeStitcher_saveCanvasToDisk(
+    JNIEnv* env, jclass /*clazz*/,
+    jstring outputDir)
+{
+    if (!gEngine) {
+        LOGE("saveCanvasToDisk called before initEngine");
+        return -1;
+    }
+
+    const char* outputDirStr = env->GetStringUTFChars(outputDir, nullptr);
+    int status = gEngine->saveCanvasToDisk(outputDirStr ? std::string(outputDirStr) : std::string());
+    if (outputDirStr) env->ReleaseStringUTFChars(outputDir, outputDirStr);
+
+    return status;
+}
+
 } // extern "C"

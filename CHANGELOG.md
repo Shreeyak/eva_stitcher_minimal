@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-03-17 (update 7)
+
+- **Quality improvements**: (1) Removed static placeholder image from mini-map; (2) Verified frames remain at full 1600×1200 resolution without downscaling; (3) Added "Save Canvas" button to bottom action bar that exports all committed canvas tiles to PNG files in Pictures/EvaWSI/.
+- **Canvas export**: Implemented `Canvas::saveAllTilesToDisk()` in native C++; wired through JNI and MethodChannel; added WRITE_EXTERNAL_STORAGE permission + Android 12+ runtime check.
+
 ## 2026-03-17 (update 6)
 
 - **Rotation applied early in analysis pipeline**: Analysis frame is now rotated 180° immediately after green-channel extraction and downscaling, before being fed to navigation. Both nav frame and canvas frame now see the same rotated orientation, eliminating the need for pose negation and making the coordinate systems consistent throughout the pipeline.

@@ -69,11 +69,7 @@ class _CanvasViewState extends State<CanvasView> {
                           fit: BoxFit.contain,
                           gaplessPlayback: true,
                         )
-                      : Image.asset(
-                          'assets/r04_c04.png',
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                        ),
+                      : const SizedBox.shrink(),
                 ),
 
                 // 3. Grid pattern overlaid on top of the stitched image

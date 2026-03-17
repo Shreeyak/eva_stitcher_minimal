@@ -69,4 +69,11 @@ object NativeStitcher {
     /** Disable capture gating — navigation continues but no frames are committed. */
     @JvmStatic
     external fun stopScanning()
+
+    /**
+     * Save all committed canvas tiles to the specified output directory.
+     * Returns 0 on success, non-zero on error.
+     */
+    @JvmStatic
+    external fun saveCanvasToDisk(outputDir: String): Int
 }

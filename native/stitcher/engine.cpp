@@ -178,3 +178,12 @@ cv::Mat Engine::downscaleFrame(
     cv::rotate(bgr, rotated, cv::ROTATE_180);
     return rotated;
 }
+
+int Engine::saveCanvasToDisk(const std::string& outputDir) {
+    if (!_initialized || !_canvas) {
+        LOGE("saveCanvasToDisk: engine not initialized");
+        return -1;
+    }
+
+    return _canvas->saveAllTilesToDisk(outputDir);
+}

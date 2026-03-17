@@ -152,4 +152,9 @@ class StitchControl {
   static Future<void> stopScanning() async {
     await _channel.invokeMethod<void>('stopScanning');
   }
+
+  static Future<Map<String, dynamic>?> saveCanvasToDisk() async {
+    final result = await _channel.invokeMethod<Map>('saveCanvas');
+    return result?.cast<String, dynamic>();
+  }
 }

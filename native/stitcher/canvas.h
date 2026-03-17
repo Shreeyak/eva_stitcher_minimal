@@ -66,6 +66,10 @@ public:
 
     void reset();
 
+    // Save all in-memory tiles to PNG files in the specified output directory.
+    // Returns 0 on success, non-zero on error.
+    int saveAllTilesToDisk(const std::string& outputDir);
+
 private:
     int         _frameW   = 0;
     int         _frameH   = 0;

@@ -7,11 +7,11 @@
 
 constexpr int   NAV_FRAME_W           = 640;
 constexpr int   NAV_FRAME_H           = 480;
-constexpr int   CANVAS_FRAME_W        = 800;
-constexpr int   CANVAS_FRAME_H        = 600;
+constexpr int   CANVAS_FRAME_W        = 1600;
+constexpr int   CANVAS_FRAME_H        = 1200;
 constexpr int   TILE_SIZE             = 512;
 constexpr int   MAX_CACHED_TILES      = 100;
-constexpr int   FEATHER_WIDTH         = 80;      // 10% of CANVAS_FRAME_W
+constexpr int   FEATHER_WIDTH         = 160;      // 10% of CANVAS_FRAME_W
 constexpr int   NAV_STATE_SIZE        = 19;
 
 // ── Capture gating ─────────────────────────────────────────────────────────
