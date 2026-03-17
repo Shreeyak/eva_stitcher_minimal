@@ -22,11 +22,10 @@ public:
     void init(int analysisW, int analysisH);
 
     // Called every analysis frame (~30fps) on the CameraX executor thread.
-    // Receives direct ByteBuffer pointers valid only during this call.
+    // framePtr is valid only during this call; do not hold a reference.
     void processAnalysisFrame(
-        uint8_t* yPtr, uint8_t* uPtr, uint8_t* vPtr,
-        int w, int h,
-        int yStride, int uvStride, int uvPixelStride,
+        const uint8_t* framePtr,
+        int w, int h, int stride,
         int rotation, int64_t timestampNs);
 
     // Returns a snapshot of navigation state packed as float[19].
@@ -40,26 +39,21 @@ public:
     void startScanning();
     void stopScanning();
 
-    // ── Crop helpers (used by processAnalysisFrame) ────────────────────────
+    // ── RGBA frame helpers ─────────────────────────────────────────────────
 
-    // Copies the center CROP_RATIO×CROP_RATIO region of the Y plane into a
-    // new CV_8UC1 Mat. Only center rows/cols are read.
-    static cv::Mat cropY(
-        const uint8_t* yPtr, int sensorW, int sensorH,
-        int yStride, int cropW, int cropH);
+    // Extracts the G channel from RGBA8888 and downscales to NAV_FRAME_W×NAV_FRAME_H.
+    // Returns a CV_8UC1 Mat suitable for phase-correlation navigation.
+    static cv::Mat extractGreenDownscale(
+        const uint8_t* framePtr, int w, int h, int stride);
 
-    // Converts the center crop region from YUV_420_888 to a BGR cv::Mat.
-    static cv::Mat cropYuvToBgr(
-        const uint8_t* yPtr, const uint8_t* uPtr, const uint8_t* vPtr,
-        int sensorW, int sensorH,
-        int yStride, int uvStride, int uvPixelStride,
-        int cropW, int cropH);
+    // Downscales RGBA8888 to CANVAS_FRAME_W×CANVAS_FRAME_H and converts to BGR.
+    // Returns a CV_8UC3 Mat suitable for canvas compositing.
+    static cv::Mat downscaleFrame(
+        const uint8_t* framePtr, int w, int h, int stride);
 
 private:
     int _analysisW = 0;
     int _analysisH = 0;
-    int _cropW = 0;
-    int _cropH = 0;
 
     bool _scanningActive = false;
     bool _captureInProgress = false;
@@ -71,6 +65,4 @@ private:
     std::unique_ptr<Canvas>     _canvas;
 
     std::mutex _stateMutex;   // protects _navState (write: analysis thread; read: Dart poll)
-
-    static int roundEven(int v) { return v & ~1; }
 };

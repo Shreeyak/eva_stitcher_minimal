@@ -2,7 +2,6 @@
 
 #include <android/log.h>
 #include <chrono>
-#include <cstring>
 
 #include <opencv2/imgproc.hpp>
 
@@ -26,36 +25,32 @@ void Engine::init(int analysisW, int analysisH) {
     _analysisW = analysisW;
     _analysisH = analysisH;
 
-    _cropW = roundEven(static_cast<int>(analysisW * CROP_RATIO));
-    _cropH = roundEven(static_cast<int>(analysisH * CROP_RATIO));
-
     _nav    = std::make_unique<Navigation>();
     _canvas = std::make_unique<Canvas>();
 
-    _nav->init(CANVAS_FRAME_W, CANVAS_FRAME_H, _cropW, _cropH);
+    _nav->init(CANVAS_FRAME_W, CANVAS_FRAME_H, NAV_FRAME_W, NAV_FRAME_H);
     _canvas->init(CANVAS_FRAME_W, CANVAS_FRAME_H);
 
     _scanningActive    = false;
     _captureInProgress = false;
     _initialized       = true;
 
-    LOGI("initEngine: analysis=%dx%d crop=%dx%d navScale=%.3f",
-         analysisW, analysisH, _cropW, _cropH,
-         static_cast<float>(CANVAS_FRAME_W) / _cropW);
+    LOGI("initEngine: analysis=%dx%d navFrame=%dx%d navScale=%.3f",
+         analysisW, analysisH, NAV_FRAME_W, NAV_FRAME_H,
+         static_cast<float>(CANVAS_FRAME_W) / NAV_FRAME_W);
 }
 
 void Engine::processAnalysisFrame(
-    uint8_t* yPtr, uint8_t* uPtr, uint8_t* vPtr,
-    int w, int h,
-    int yStride, int uvStride, int uvPixelStride,
+    const uint8_t* framePtr,
+    int w, int h, int stride,
     int rotation, int64_t timestampNs)
 {
     if (!_initialized) return;
 
     const int64_t t0 = nowMs();
 
-    // ── Step 1: Crop Y plane → nav frame ──────────────────────────────────
-    cv::Mat navFrame = cropY(yPtr, w, h, yStride, _cropW, _cropH);
+    // ── Step 1: Extract G channel + downscale → 640×480 nav frame ─────────
+    cv::Mat navFrame = extractGreenDownscale(framePtr, w, h, stride);
 
     // TODO(phase2-rotation): apply rotation if needed before nav
     (void)rotation;
@@ -76,30 +71,17 @@ void Engine::processAnalysisFrame(
 
         const int64_t tCommit0 = nowMs();
 
-        // Crop + convert analysis YUV → BGR
-        cv::Mat bgrCrop = cropYuvToBgr(
-            yPtr, uPtr, vPtr,
-            w, h, yStride, uvStride, uvPixelStride,
-            _cropW, _cropH);
+        // Downscale RGBA → 800×600 BGR canvas frame
+        cv::Mat canvasFrame = downscaleFrame(framePtr, w, h, stride);
 
-        // Resize → 800×600 canvas frame
-        cv::Mat canvasFrame;
-        cv::resize(bgrCrop, canvasFrame, cv::Size(CANVAS_FRAME_W, CANVAS_FRAME_H));
-
-        // Read pose from navigation
         Pose pose = _nav->getCurrentPose();
-
-        // Composite onto canvas
         _canvas->compositeFrame(canvasFrame, pose);
-
-        // Increment frame count
         _nav->onFrameCommitted();
         _captureInProgress = false;
 
         const int64_t commitMs = nowMs() - tCommit0;
         LOGI("processAnalysisFrame commit: totalMs=%lld", (long long)commitMs);
 
-        // Update compositeTimeMs in state
         std::lock_guard<std::mutex> lock(_stateMutex);
         _navState.compositeTimeMs = static_cast<float>(commitMs);
         _navState.framesCaptured  = _nav->getState().framesCaptured;
@@ -136,57 +118,36 @@ void Engine::stopScanning() {
     LOGI("stopScanning");
 }
 
-// ── Crop helpers ───────────────────────────────────────────────────────────
+// ── RGBA frame helpers ─────────────────────────────────────────────────────
 
-cv::Mat Engine::cropY(
-    const uint8_t* yPtr, int sensorW, int sensorH,
-    int yStride, int cropW, int cropH)
+cv::Mat Engine::extractGreenDownscale(
+    const uint8_t* framePtr, int w, int h, int stride)
 {
-    const int offsetX = (sensorW - cropW) / 2;
-    const int offsetY = (sensorH - cropH) / 2;
+    // Wrap RGBA data as a cv::Mat — zero copy (stride may exceed w*4 due to row padding)
+    cv::Mat rgba(h, w, CV_8UC4, const_cast<uint8_t*>(framePtr), static_cast<size_t>(stride));
 
-    cv::Mat out(cropH, cropW, CV_8UC1);
-    for (int row = 0; row < cropH; ++row) {
-        const uint8_t* src = yPtr + (offsetY + row) * yStride + offsetX;
-        std::memcpy(out.ptr(row), src, static_cast<size_t>(cropW));
-    }
-    return out;
+    // Extract G channel (index 1 in RGBA layout)
+    cv::Mat green;
+    cv::extractChannel(rgba, green, 1);
+
+    // Downscale to fixed nav frame dimensions
+    cv::Mat navFrame;
+    cv::resize(green, navFrame, cv::Size(NAV_FRAME_W, NAV_FRAME_H), 0, 0, cv::INTER_LINEAR);
+    return navFrame;
 }
 
-cv::Mat Engine::cropYuvToBgr(
-    const uint8_t* yPtr, const uint8_t* uPtr, const uint8_t* vPtr,
-    int sensorW, int sensorH,
-    int yStride, int uvStride, int uvPixelStride,
-    int cropW, int cropH)
+cv::Mat Engine::downscaleFrame(
+    const uint8_t* framePtr, int w, int h, int stride)
 {
-    const int offsetX = (sensorW - cropW) / 2;
-    const int offsetY = (sensorH - cropH) / 2;
+    // Wrap RGBA data as a cv::Mat — zero copy
+    cv::Mat rgba(h, w, CV_8UC4, const_cast<uint8_t*>(framePtr), static_cast<size_t>(stride));
 
-    // Build NV21 buffer for the cropped region: [Y rows][UV interleaved rows]
-    const int uvCropH = cropH / 2;
-    const int uvCropW = cropW / 2;
+    // Downscale to canvas frame size
+    cv::Mat resized;
+    cv::resize(rgba, resized, cv::Size(CANVAS_FRAME_W, CANVAS_FRAME_H), 0, 0, cv::INTER_LINEAR);
 
-    cv::Mat nv21(cropH + uvCropH, cropW, CV_8UC1);
-
-    // Copy Y rows
-    for (int row = 0; row < cropH; ++row) {
-        const uint8_t* src = yPtr + (offsetY + row) * yStride + offsetX;
-        std::memcpy(nv21.ptr(row), src, static_cast<size_t>(cropW));
-    }
-
-    // Interleave V, U (NV21: V first) from UV planes
-    uint8_t* uvDst = nv21.ptr(cropH);
-    const int uvOffsetX = offsetX / 2;
-    const int uvOffsetY = offsetY / 2;
-    for (int row = 0; row < uvCropH; ++row) {
-        for (int col = 0; col < uvCropW; ++col) {
-            const int uvIdx = (uvOffsetY + row) * uvStride + (uvOffsetX + col) * uvPixelStride;
-            *uvDst++ = vPtr[uvIdx]; // V
-            *uvDst++ = uPtr[uvIdx]; // U
-        }
-    }
-
+    // Convert RGBA → BGR for canvas tile format
     cv::Mat bgr;
-    cv::cvtColor(nv21, bgr, cv::COLOR_YUV2BGR_NV21);
+    cv::cvtColor(resized, bgr, cv::COLOR_RGBA2BGR);
     return bgr;
 }

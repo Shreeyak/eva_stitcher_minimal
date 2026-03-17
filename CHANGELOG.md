@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-03-17 (update 2)
+
+- **RGBA8888 stitcher update**: Switched ImageAnalysis format from `YUV_420_888` to `RGBA_8888` in `CameraManager.kt`; replaced YUV 3-plane crop helpers (`cropY`/`cropYuvToBgr`) with RGBA helpers (`extractGreenDownscale`: G-channel → 640×480 nav, `downscaleRgba`: RGBA→BGR 800×600 canvas frame); replaced `CROP_RATIO` constant with fixed `NAV_FRAME_W=640`/`NAV_FRAME_H=480`.
+- Updated JNI bridge and `NativeStitcher.kt` to accept a single `rgbaBuf: ByteBuffer` + `stride: Int` instead of three YUV plane buffers; `MainActivity.kt` now passes `planes[0]` only.
+
 ## 2026-03-17
 
 - **Phase 1 (JNI Zero-Copy + Build Scaffold)**: Replaced ByteArray frame path with ByteBuffer zero-copy JNI; added `jni_bridge.cpp`, `engine.h/cpp`, `canvas.h/cpp`, `types.h`; created `lib/stitcher/stitch_state.dart` (`NavigationState`, `StitchControl`); updated `NativeStitcher.kt` and `MainActivity.kt` with new stitch MethodChannel; camera now requests 1600×1200 analysis and calls `initEngine` after start.

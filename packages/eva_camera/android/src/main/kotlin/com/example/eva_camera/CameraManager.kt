@@ -277,13 +277,13 @@ class CameraManager(
             }
             imageCapture = captureBuilder.build()
 
-            // ── ImageAnalysis (YUV_420_888 for future C++ BGR conversion) ──
+            // ── ImageAnalysis (RGBA_8888 — single plane, 4 bytes/pixel) ──────────
             val analysisBuilder =
                 ImageAnalysis
                     .Builder()
                     .setResolutionSelector(analysisResolution)
                     .setOutputImageFormat(
-                        ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888,
+                        ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888,
                     ).setBackpressureStrategy(
                         ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST,
                     ).setTargetRotation(Surface.ROTATION_0)

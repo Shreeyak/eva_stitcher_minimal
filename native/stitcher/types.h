@@ -5,7 +5,8 @@
 
 // ── Build constants ────────────────────────────────────────────────────────
 
-constexpr float CROP_RATIO            = 0.40f;
+constexpr int   NAV_FRAME_W           = 640;
+constexpr int   NAV_FRAME_H           = 480;
 constexpr int   CANVAS_FRAME_W        = 800;
 constexpr int   CANVAS_FRAME_H        = 600;
 constexpr int   TILE_SIZE             = 512;

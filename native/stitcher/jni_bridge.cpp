@@ -29,9 +29,8 @@ Java_com_example_eva_1minimal_1demo_NativeStitcher_initEngine(
 JNIEXPORT void JNICALL
 Java_com_example_eva_1minimal_1demo_NativeStitcher_processAnalysisFrame(
     JNIEnv* env, jclass /*clazz*/,
-    jobject yBuf, jobject uBuf, jobject vBuf,
-    jint w, jint h,
-    jint yStride, jint uvStride, jint uvPixelStride,
+    jobject frameBuf,
+    jint w, jint h, jint stride,
     jint rotation, jlong timestampNs)
 {
     if (!gEngine) {
@@ -39,19 +38,15 @@ Java_com_example_eva_1minimal_1demo_NativeStitcher_processAnalysisFrame(
         return;
     }
 
-    auto* yPtr = static_cast<uint8_t*>(env->GetDirectBufferAddress(yBuf));
-    auto* uPtr = static_cast<uint8_t*>(env->GetDirectBufferAddress(uBuf));
-    auto* vPtr = static_cast<uint8_t*>(env->GetDirectBufferAddress(vBuf));
-
-    if (!yPtr || !uPtr || !vPtr) {
+    auto* framePtr = static_cast<const uint8_t*>(env->GetDirectBufferAddress(frameBuf));
+    if (!framePtr) {
         LOGE("processAnalysisFrame: null ByteBuffer pointer");
         return;
     }
 
     gEngine->processAnalysisFrame(
-        yPtr, uPtr, vPtr,
-        static_cast<int>(w), static_cast<int>(h),
-        static_cast<int>(yStride), static_cast<int>(uvStride), static_cast<int>(uvPixelStride),
+        framePtr,
+        static_cast<int>(w), static_cast<int>(h), static_cast<int>(stride),
         static_cast<int>(rotation), static_cast<int64_t>(timestampNs));
 }
 

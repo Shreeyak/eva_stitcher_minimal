@@ -31,20 +31,16 @@ object NativeStitcher {
     external fun initEngine(analysisW: Int, analysisH: Int)
 
     /**
-     * Process one YUV_420_888 analysis frame.
-     * All three ByteBuffers must be direct (GetDirectBufferAddress is used — no copy).
-     * The buffers are only valid during this call; do not hold references.
+     * Process one RGBA8888 analysis frame.
+     * The ByteBuffer must be direct (GetDirectBufferAddress — no copy).
+     * The buffer is only valid during this call; do not hold a reference.
      */
     @JvmStatic
     external fun processAnalysisFrame(
-        yBuf: ByteBuffer,
-        uBuf: ByteBuffer,
-        vBuf: ByteBuffer,
+        frameBuf: ByteBuffer,
         w: Int,
         h: Int,
-        yStride: Int,
-        uvStride: Int,
-        uvPixelStride: Int,
+        stride: Int,
         rotation: Int,
         timestampNs: Long,
     )

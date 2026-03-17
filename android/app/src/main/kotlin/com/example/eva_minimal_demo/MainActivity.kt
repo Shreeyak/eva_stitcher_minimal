@@ -31,13 +31,9 @@ class MainActivity : FlutterActivity() {
                 ): Float {
                     NativeStitcher.processAnalysisFrame(
                         imageProxy.planes[0].buffer,
-                        imageProxy.planes[1].buffer,
-                        imageProxy.planes[2].buffer,
                         imageProxy.width,
                         imageProxy.height,
                         imageProxy.planes[0].rowStride,
-                        imageProxy.planes[1].rowStride,
-                        imageProxy.planes[1].pixelStride,
                         imageProxy.imageInfo.rotationDegrees,
                         imageProxy.imageInfo.timestamp,
                     )
