@@ -85,6 +85,9 @@ void Engine::processAnalysisFrame(
         const int64_t downscaleMs = nowMs() - tDownscale;
 
         Pose pose = _nav->getCurrentPose();
+        // Canvas frame is rotated 180°, so negate pose to match rotated coordinates
+        pose.x = -pose.x;
+        pose.y = -pose.y;
 
         const int64_t tComposite = nowMs();
         _canvas->compositeFrame(canvasFrame, pose);
@@ -171,5 +174,9 @@ cv::Mat Engine::downscaleFrame(
     // Convert RGBA → BGR for canvas tile format
     cv::Mat bgr;
     cv::cvtColor(resized, bgr, cv::COLOR_RGBA2BGR);
-    return bgr;
+
+    // Apply 180° clockwise rotation to match preview orientation
+    cv::Mat rotated;
+    cv::rotate(bgr, rotated, cv::ROTATE_180);
+    return rotated;
 }

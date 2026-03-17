@@ -1,6 +1,7 @@
 package com.example.eva_camera
 
 import android.content.Context
+import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
@@ -82,6 +83,12 @@ class CameraManager(
     private var captureFormatYuv: Boolean = true
     private var preferredCaptureSize: Size = Size(4208, 3120)
     private var preferredAnalysisSize: Size = Size(1280, 960)
+
+    // Center crop applied via SCALER_CROP_REGION — extracts a 1600×1200 region from the sensor.
+    // Null means no crop (use full active array).
+    private var sensorCropRect: Rect? = null
+    private val sensorCropWidth = 1600
+    private val sensorCropHeight = 1200
 
     // Manual sensor settings (app always starts with AE off)
     private var storedExposureTimeNs: Long = 1_000_000L // 1ms per PLAN_ARCH spec
@@ -380,6 +387,22 @@ class CameraManager(
             // Load static characteristics (CCM, ranges) and dump to file
             loadStaticColorTransform(cam)
 
+            // Compute sensor center-crop rect from active array size.
+            // Applied as SCALER_CROP_REGION in applyAllCaptureOptions.
+            val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
+            val activeArray = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+            )
+            if (activeArray != null) {
+                val left = (activeArray.width() - sensorCropWidth) / 2
+                val top = (activeArray.height() - sensorCropHeight) / 2
+                sensorCropRect = Rect(left, top, left + sensorCropWidth, top + sensorCropHeight)
+                Log.i(TAG, "Sensor crop: activeArray=${activeArray.width()}x${activeArray.height()} cropRect=$sensorCropRect")
+            } else {
+                sensorCropRect = null
+                Log.w(TAG, "SENSOR_INFO_ACTIVE_ARRAY_SIZE unavailable — no center crop applied")
+            }
+
             // Reset frame counter
             frameCount = 0
             lastFpsTime = System.nanoTime()
@@ -416,6 +439,7 @@ class CameraManager(
         defaultAeTargetFpsRange = null
         availableAeTargetFpsRanges = emptyArray()
         aeTargetFpsRange = null
+        sensorCropRect = null
 
         val executor = cameraExecutor
         if (executor == null) {
@@ -957,6 +981,11 @@ class CameraManager(
                 CaptureRequest.SHADING_MODE,
                 CameraMetadata.SHADING_MODE_FAST,
             )
+
+        // Center crop via SCALER_CROP_REGION — restricts all use cases to the same 1600×1200 window.
+        sensorCropRect?.let { crop ->
+            builder.setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION, crop)
+        }
 
         val future = camera2Control.setCaptureRequestOptions(builder.build())
         future.addListener(

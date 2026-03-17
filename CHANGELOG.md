@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-03-17 (update 6)
+
+- **Transform sign fix for 180° rotated canvas**: After rotating canvas frame 180° to match preview orientation, pose components are now negated (`pose.x = -pose.x; pose.y = -pose.y`) in `Engine::processAnalysisFrame()` to account for the rotation. This fixes frames being placed in the opposite direction (right→left, up→down).
+
+## 2026-03-17 (update 5)
+
+- **Sharpness threshold relaxed**: Lowered `SHARPNESS_THRESHOLD` from `0.15f` to `0.08f` in `native/stitcher/types.h` to reduce strictness of frame quality gating and accept a wider range of motion blur levels.
+- **Canvas frame 180° rotation**: Added `cv::rotate(..., cv::ROTATE_180)` to `Engine::downscaleFrame()` to correct orientation mismatch between camera sensor native orientation and preview display orientation.
+
+## 2026-03-17 (update 4)
+
+- **SCALER_CROP_REGION center-crop fix**: CameraManager now reads `SENSOR_INFO_ACTIVE_ARRAY_SIZE` on camera bind and computes a center-crop `Rect` (1600×1200 from sensor), applied via `CaptureRequest.SCALER_CROP_REGION` in `applyAllCaptureOptions`. All use cases (preview, capture, analysis) see the same cropped FOV, eliminating full-sensor lens distortion in the stitched output.
+
 ## 2026-03-17 (update 3)
 
 - **Phase 3 (Tiled Canvas + Compositing)**: Replaced 4096×4096 monolithic stub with an `unordered_map`-backed LRU tile cache (`CV_8UC3` BGR pixels + `CV_8UC1` mask per tile — no alpha channel). Feather weight map pre-computed once at init via OpenCV mat ops. `compositeFrame` splits each tile subregion into interior (w=1, direct overwrite) and feather-band strips (w<1, blend only written pixels; direct copy for empty); float arithmetic is confined to the narrow feather band only. LRU eviction flushes dirty tiles to PNG on disk; `getTile` reloads from disk on cache miss. `renderPreview` uses a shared lock; `compositeFrame`/`reset` use exclusive lock; `getOverlapRatio` is lock-free (analysis thread only). `initEngine` now accepts a `cacheDir` string propagated from `MainActivity.kt` (`filesDir/tile_cache`) through JNI → `Engine::init` → `Canvas::init`.
