@@ -76,4 +76,11 @@ object NativeStitcher {
      */
     @JvmStatic
     external fun saveCanvasToDisk(outputDir: String): Int
+
+    /**
+     * Composite all canvas tiles into a single PNG at the given file path,
+     * cropped to the written bounds. Returns 0 on success, non-zero on error.
+     */
+    @JvmStatic
+    external fun saveCanvasAsImage(outputPath: String): Int
 }

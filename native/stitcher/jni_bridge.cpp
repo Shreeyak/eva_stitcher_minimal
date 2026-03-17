@@ -137,4 +137,23 @@ Java_com_example_eva_1minimal_1demo_NativeStitcher_saveCanvasToDisk(
     return status;
 }
 
+// ── saveCanvasAsImage ─────────────────────────────────────────────────────
+
+JNIEXPORT jint JNICALL
+Java_com_example_eva_1minimal_1demo_NativeStitcher_saveCanvasAsImage(
+    JNIEnv* env, jclass /*clazz*/,
+    jstring outputPath)
+{
+    if (!gEngine) {
+        LOGE("saveCanvasAsImage called before initEngine");
+        return -1;
+    }
+
+    const char* pathStr = env->GetStringUTFChars(outputPath, nullptr);
+    int status = gEngine->saveCanvasAsImage(pathStr ? std::string(pathStr) : std::string());
+    if (pathStr) env->ReleaseStringUTFChars(outputPath, pathStr);
+
+    return status;
+}
+
 } // extern "C"

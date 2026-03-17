@@ -523,13 +523,11 @@ class _CameraScreenState extends State<CameraScreen> {
       );
       final result = await StitchControl.saveCanvasToDisk();
       if (mounted) {
-        final count = result?['count'] as int?;
-        final saved = result != null && (count ?? 0) > 0;
+        final path = result?['path'] as String?;
+        final saved = result != null && result['success'] == true;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(saved
-                ? 'Saved $count tile(s) to Pictures/EvaWSI'
-                : 'Save failed'),
+            content: Text(saved ? 'Canvas saved to $path' : 'Save failed'),
             duration: const Duration(seconds: 3),
           ),
         );

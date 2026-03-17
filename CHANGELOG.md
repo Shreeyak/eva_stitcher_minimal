@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-03-17 (update 11)
+
+- **Save canvas as single image**: Added `Canvas::saveCanvasAsImage` that composites all tiles into one PNG cropped to the written bounds. Wired through Engine → JNI → Kotlin → Dart. Single file published to `Pictures/EvaWSI/` via MediaStore.
+
 ## 2026-03-17 (update 10)
 
 - **Save canvas to Pictures/EvaWSI**: Tiles now saved to public `Pictures/EvaWSI/` via MediaStore (API 29+ scoped storage — no runtime permissions required). Temp tiles written to cache first, then published via `ContentResolver`.

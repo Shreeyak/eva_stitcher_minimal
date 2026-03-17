@@ -41,6 +41,10 @@ public:
     // Returns 0 on success, -1 on error (e.g., invalid directory, write failure).
     int saveCanvasToDisk(const std::string& outputDir);
 
+    // Composites all tiles into a single PNG at outputPath, cropped to written bounds.
+    // Returns 0 on success, -1 on error.
+    int saveCanvasAsImage(const std::string& outputPath);
+
     void reset();
     void startScanning();
     void stopScanning();

@@ -414,3 +414,55 @@ int Canvas::saveAllTilesToDisk(const std::string& outputDir) {
     LOGI("saveAllTilesToDisk: saved %d tiles, %d errors to %s", savedCount, errorCount, outputDir.c_str());
     return errorCount > 0 ? -1 : 0;
 }
+
+// ── saveCanvasAsImage ──────────────────────────────────────────────────────
+
+int Canvas::saveCanvasAsImage(const std::string& outputPath) {
+    std::unique_lock lock(_canvasMutex);
+
+    if (_empty || _tiles.empty()) {
+        LOGI("saveCanvasAsImage: canvas is empty, nothing to save");
+        return 0;
+    }
+
+    // Determine tile grid extent
+    int colMin = INT_MAX, colMax = INT_MIN, rowMin = INT_MAX, rowMax = INT_MIN;
+    for (auto& [key, tile] : _tiles) {
+        if (!tile || tile->pixels.empty()) continue;
+        colMin = std::min(colMin, key.col);
+        colMax = std::max(colMax, key.col);
+        rowMin = std::min(rowMin, key.row);
+        rowMax = std::max(rowMax, key.row);
+    }
+    if (colMin > colMax) return 0;
+
+    // Allocate full tiled canvas
+    const int imgW = (colMax - colMin + 1) * TILE_SIZE;
+    const int imgH = (rowMax - rowMin + 1) * TILE_SIZE;
+    cv::Mat output(imgH, imgW, CV_8UC3, cv::Scalar(0, 0, 0));
+
+    for (auto& [key, tile] : _tiles) {
+        if (!tile || tile->pixels.empty()) continue;
+        const int dx = (key.col - colMin) * TILE_SIZE;
+        const int dy = (key.row - rowMin) * TILE_SIZE;
+        tile->pixels.copyTo(output(cv::Rect(dx, dy, TILE_SIZE, TILE_SIZE)));
+    }
+
+    // Crop to the actual written bounds tracked in _minX/_minY/_maxX/_maxY
+    const int originX = colMin * TILE_SIZE;
+    const int originY = rowMin * TILE_SIZE;
+    int cropX = std::max(0, static_cast<int>(_minX) - originX);
+    int cropY = std::max(0, static_cast<int>(_minY) - originY);
+    int cropW = std::min(static_cast<int>(std::ceil(_maxX - _minX)), imgW - cropX);
+    int cropH = std::min(static_cast<int>(std::ceil(_maxY - _minY)), imgH - cropY);
+
+    if (cropW <= 0 || cropH <= 0) {
+        LOGI("saveCanvasAsImage: degenerate crop, saving full tiled image");
+        cropX = 0; cropY = 0; cropW = imgW; cropH = imgH;
+    }
+
+    cv::Mat cropped = output(cv::Rect(cropX, cropY, cropW, cropH));
+    bool ok = cv::imwrite(outputPath, cropped);
+    LOGI("saveCanvasAsImage: %dx%d -> %s (%s)", cropW, cropH, outputPath.c_str(), ok ? "ok" : "FAILED");
+    return ok ? 0 : -1;
+}

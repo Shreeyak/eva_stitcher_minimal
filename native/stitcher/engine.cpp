@@ -187,3 +187,12 @@ int Engine::saveCanvasToDisk(const std::string& outputDir) {
 
     return _canvas->saveAllTilesToDisk(outputDir);
 }
+
+int Engine::saveCanvasAsImage(const std::string& outputPath) {
+    if (!_initialized || !_canvas) {
+        LOGE("saveCanvasAsImage: engine not initialized");
+        return -1;
+    }
+
+    return _canvas->saveCanvasAsImage(outputPath);
+}

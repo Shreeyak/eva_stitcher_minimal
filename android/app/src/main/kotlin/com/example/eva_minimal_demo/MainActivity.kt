@@ -111,49 +111,43 @@ class MainActivity : FlutterActivity() {
                 }
                 "saveCanvas" -> {
                     try {
-                        // Save tiles to a temp dir, then publish each to Pictures/EvaWSI via
-                        // MediaStore. On API 29+ (scoped storage) no WRITE_EXTERNAL_STORAGE
-                        // permission is required for MediaStore writes.
-                        val tmpDir = File(cacheDir, "canvas_tiles_tmp").apply {
-                            deleteRecursively()
-                            mkdirs()
-                        }
-                        val status = NativeStitcher.saveCanvasToDisk(tmpDir.absolutePath)
+                        // Render the canvas as a single PNG into a temp file, then
+                        // publish it to Pictures/EvaWSI via MediaStore (no permissions
+                        // required on API 29+ scoped storage).
+                        val tmpFile = File(cacheDir, "eva_canvas_tmp.png")
+                        val status = NativeStitcher.saveCanvasAsImage(tmpFile.absolutePath)
                         if (status != 0) {
                             result.error("SAVE_ERROR", "Native save returned $status", null)
                             return@setMethodCallHandler
                         }
 
-                        val savedUris = mutableListOf<String>()
-                        val resolver = contentResolver
-                        tmpDir.listFiles()?.forEach { tileFile ->
-                            val values = ContentValues().apply {
-                                put(MediaStore.Images.Media.DISPLAY_NAME, tileFile.name)
-                                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                                put(MediaStore.Images.Media.RELATIVE_PATH,
-                                    "${Environment.DIRECTORY_PICTURES}/EvaWSI")
-                                put(MediaStore.Images.Media.IS_PENDING, 1)
-                            }
-                            val uri: Uri? = resolver.insert(
-                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                            if (uri != null) {
-                                resolver.openOutputStream(uri)?.use { out ->
-                                    tileFile.inputStream().use { it.copyTo(out) }
-                                }
-                                values.clear()
-                                values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                                resolver.update(uri, values, null, null)
-                                savedUris.add(uri.toString())
-                            } else {
-                                Log.e(TAG, "saveCanvas: MediaStore insert failed for ${tileFile.name}")
-                            }
+                        val timestamp = System.currentTimeMillis()
+                        val fileName = "eva_canvas_$timestamp.png"
+                        val values = ContentValues().apply {
+                            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                            put(MediaStore.Images.Media.RELATIVE_PATH,
+                                "${Environment.DIRECTORY_PICTURES}/EvaWSI")
+                            put(MediaStore.Images.Media.IS_PENDING, 1)
                         }
-                        tmpDir.deleteRecursively()
+                        val uri: Uri? = contentResolver.insert(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                        if (uri == null) {
+                            tmpFile.delete()
+                            result.error("SAVE_ERROR", "MediaStore insert failed", null)
+                            return@setMethodCallHandler
+                        }
+                        contentResolver.openOutputStream(uri)?.use { out ->
+                            tmpFile.inputStream().use { it.copyTo(out) }
+                        }
+                        values.clear()
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        contentResolver.update(uri, values, null, null)
+                        tmpFile.delete()
 
                         result.success(mapOf(
                             "success" to true,
-                            "path" to "${Environment.DIRECTORY_PICTURES}/EvaWSI",
-                            "count" to savedUris.size,
+                            "path" to "${Environment.DIRECTORY_PICTURES}/EvaWSI/$fileName",
                         ))
                     } catch (e: Exception) {
                         Log.e(TAG, "saveCanvas error: ${e.message}")
