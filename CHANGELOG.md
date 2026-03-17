@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-17 (update 15)
+
+### Phase 7 — UI Integration
+
+- **InfoBar**: Renamed `BottomInfoBar` → `InfoBar`; removed placeholder `COVERAGE`/`totalTarget` chips; added `CONF` chip showing `lastConfidence` to 2 decimal places.
+- **VelocityBar + QualityBar**: Added vertical velocity bar (green→yellow→red, left of preview) and horizontal quality bar (red/yellow/green, below preview) driven by `NavigationState.speed/quality`.
+- **Capture flash**: Preview border pulses to full `colorScheme.primary` with glow for 300 ms each time `framesCaptured` increments.
+
 ## 2026-03-17 (update 14)
 
 - **Rotate image buffers with OpenCV**: CameraX’s `setTargetRotation` is purely metadata, so we now rotate the analysis buffer and nav frames 180° via `cv::rotate`. This keeps the pipeline aligned with the preview while preserving the rotation flag expected by the platform.

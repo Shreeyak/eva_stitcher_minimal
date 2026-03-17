@@ -8,8 +8,10 @@ import 'theme/material_theme_salmon.dart';
 import 'theme/theme_util.dart';
 import 'package:eva_camera/eva_camera.dart';
 import 'camera/camera_callbacks.dart';
-import 'widgets/bottom_info_bar.dart';
+import 'widgets/info_bar.dart';
 import 'widgets/interactive_bottom_bar.dart';
+import 'widgets/velocity_bar.dart';
+import 'widgets/quality_bar.dart';
 import 'widgets/canvas_view.dart';
 import 'widgets/camera_control_overlay.dart';
 import 'widgets/mini_map.dart';
@@ -98,6 +100,10 @@ class _CameraScreenState extends State<CameraScreen> {
   Timer? _navPollTimer;
   Uint8List? _canvasPreviewBytes;
   int _navPollTicks = 0;
+
+  // ── Capture flash ──────────────────────────────────────────────────
+  bool _captureFlash = false;
+  Timer? _flashTimer;
   String? _navPollError;
 
   @override
@@ -255,6 +261,7 @@ class _CameraScreenState extends State<CameraScreen> {
         if (newFrame) {
           _prevFramesCaptured = state.framesCaptured;
           _fetchCanvasPreview();
+          _triggerCaptureFlash();
         }
         setState(() {
           _navState = state;
@@ -277,11 +284,20 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() => _canvasPreviewBytes = bytes);
   }
 
+  void _triggerCaptureFlash() {
+    _flashTimer?.cancel();
+    setState(() => _captureFlash = true);
+    _flashTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() => _captureFlash = false);
+    });
+  }
+
   @override
   void dispose() {
     _eventSub?.cancel();
     _sessionTimer?.cancel();
     _navPollTimer?.cancel();
+    _flashTimer?.cancel();
     _afFocusSyncTimer?.cancel();
     _settingsQueue.cancel();
     CameraControl.stopCamera();
@@ -586,26 +602,67 @@ class _CameraScreenState extends State<CameraScreen> {
                       child: Center(
                         child: FractionallySizedBox(
                           widthFactor: 0.6,
-                          child: AspectRatio(
-                            aspectRatio: 4 / 3,
-                            child: GestureDetector(
-                              onTap: _cameraStarted
-                                  ? () => _setWbLocked(true)
-                                  : null,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: cs.primary.withValues(alpha: 0.8),
-                                    width: 2,
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: _buildCameraPreview(),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Camera preview with velocity bar overlaid to the left
+                              AspectRatio(
+                                aspectRatio: 4 / 3,
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    // Preview fills the stack
+                                    GestureDetector(
+                                      onTap: _cameraStarted
+                                          ? () => _setWbLocked(true)
+                                          : null,
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 150),
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: _captureFlash
+                                                ? cs.primary
+                                                : cs.primary.withValues(alpha: 0.5),
+                                            width: _captureFlash ? 3 : 2,
+                                          ),
+                                          borderRadius: BorderRadius.circular(8),
+                                          boxShadow: _captureFlash
+                                              ? [
+                                                  BoxShadow(
+                                                    color: cs.primary.withValues(alpha: 0.5),
+                                                    blurRadius: 8,
+                                                    spreadRadius: 2,
+                                                  ),
+                                                ]
+                                              : null,
+                                        ),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: _buildCameraPreview(),
+                                        ),
+                                      ),
+                                    ),
+                                    // Velocity bar — positioned outside preview, left edge
+                                    Positioned(
+                                      left: -14,
+                                      top: 0,
+                                      bottom: 0,
+                                      width: 8,
+                                      child: VelocityBar(speed: _navState.speed),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ),
+                              const SizedBox(height: 4),
+                              // Quality bar — full width, below preview
+                              SizedBox(
+                                height: 4,
+                                child: QualityBar(
+                                  quality: _navState.quality,
+                                  trackingState: _navState.trackingState,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -634,12 +691,11 @@ class _CameraScreenState extends State<CameraScreen> {
                 top: 0,
                 left: 0,
                 right: 0,
-                child: BottomInfoBar(
+                child: InfoBar(
                   isScanning: _isScanning,
                   frameCount: _info.frameCount,
                   stitchedCount: _navState.framesCaptured,
-                  totalTarget: 0,
-                  coveragePct: 0.0,
+                  lastConfidence: _navState.lastConfidence,
                   sessionSeconds: _sessionSeconds,
                 ),
               ),
