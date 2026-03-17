@@ -2,7 +2,7 @@
 
 ## 2026-03-17 (update 6)
 
-- **Transform sign fix for 180° rotated canvas**: After rotating canvas frame 180° to match preview orientation, pose components are now negated (`pose.x = -pose.x; pose.y = -pose.y`) in `Engine::processAnalysisFrame()` to account for the rotation. This fixes frames being placed in the opposite direction (right→left, up→down).
+- **Rotation applied early in analysis pipeline**: Analysis frame is now rotated 180° immediately after green-channel extraction and downscaling, before being fed to navigation. Both nav frame and canvas frame now see the same rotated orientation, eliminating the need for pose negation and making the coordinate systems consistent throughout the pipeline.
 
 ## 2026-03-17 (update 5)
 

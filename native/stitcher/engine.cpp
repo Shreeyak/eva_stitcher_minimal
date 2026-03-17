@@ -56,11 +56,12 @@ void Engine::processAnalysisFrame(
     // ── Step 1: Extract G channel + downscale → 640×480 nav frame ─────────
     cv::Mat navFrame = extractGreenDownscale(framePtr, w, h, stride);
 
-    // TODO(phase8): apply rotation for non-0° devices
-    (void)rotation;
+    // Apply 180° rotation to align with canvas/preview orientation
+    cv::Mat navFrameRotated;
+    cv::rotate(navFrame, navFrameRotated, cv::ROTATE_180);
 
     // ── Step 2: Navigation (phase correlation, velocity, gating) ──────────
-    const bool triggerCommit = _nav->processFrame(navFrame, timestampNs, _scanningActive, _canvas.get());
+    const bool triggerCommit = _nav->processFrame(navFrameRotated, timestampNs, _scanningActive, _canvas.get());
 
     // ── Step 3: Pack NavigationState ──────────────────────────────────────
     // getBounds() acquires _canvasMutex (shared). We must NOT hold _stateMutex
@@ -85,9 +86,6 @@ void Engine::processAnalysisFrame(
         const int64_t downscaleMs = nowMs() - tDownscale;
 
         Pose pose = _nav->getCurrentPose();
-        // Canvas frame is rotated 180°, so negate pose to match rotated coordinates
-        pose.x = -pose.x;
-        pose.y = -pose.y;
 
         const int64_t tComposite = nowMs();
         _canvas->compositeFrame(canvasFrame, pose);
