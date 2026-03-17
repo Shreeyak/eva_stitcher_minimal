@@ -140,7 +140,7 @@ class CameraValues {
   const CameraValues({
     this.isoValue = 200,
     this.exposureTimeNs = 1000000,
-    this.focusDistance = 0.0,
+    this.focusDistance = 0.1,
     this.zoomRatio = 1.0,
     this.afEnabled = true,
     this.wbLocked = false,
