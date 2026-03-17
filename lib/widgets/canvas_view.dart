@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 /// Infinite scrollable canvas showing the stitched image on top of a grid
@@ -8,7 +10,11 @@ class CanvasView extends StatefulWidget {
   static const double kCanvasWidth = 6000;
   static const double kCanvasHeight = 6000;
 
-  const CanvasView({super.key});
+  const CanvasView({super.key, this.previewBytes});
+
+  /// Live JPEG preview from the stitching engine.  Replaces the placeholder
+  /// asset once available.
+  final Uint8List? previewBytes;
 
   @override
   State<CanvasView> createState() => _CanvasViewState();
@@ -57,11 +63,17 @@ class _CanvasViewState extends State<CanvasView> {
 
                 // 2. Stitched image, centered in the canvas
                 Center(
-                  child: Image.asset(
-                    'assets/r04_c04.png',
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  ),
+                  child: widget.previewBytes != null
+                      ? Image.memory(
+                          widget.previewBytes!,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                        )
+                      : Image.asset(
+                          'assets/r04_c04.png',
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
                 ),
 
                 // 3. Grid pattern overlaid on top of the stitched image

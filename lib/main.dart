@@ -14,6 +14,7 @@ import 'widgets/canvas_view.dart';
 import 'widgets/camera_control_overlay.dart';
 import 'widgets/mini_map.dart';
 import 'widgets/bottom_bar_buttons.dart';
+import 'stitcher/stitch_state.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -87,8 +88,13 @@ class _CameraScreenState extends State<CameraScreen> {
 
   // ── Session timer ─────────────────────────────────────────────────
   int _sessionSeconds = 0;
-  int _stitchedCount = 0;
   Timer? _sessionTimer;
+
+  // ── Stitch / navigation state ─────────────────────────────────────
+  NavigationState _navState = NavigationState.empty;
+  int _prevFramesCaptured = 0;
+  Timer? _navPollTimer;
+  Uint8List? _canvasPreviewBytes;
 
   @override
   void initState() {
@@ -163,7 +169,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _startCamera() async {
     try {
-      final info = await CameraControl.startCamera();
+      final info = await CameraControl.startCamera(
+        analysisWidth: 1600,
+        analysisHeight: 1200,
+      );
       if (!mounted) return;
 
       final cw = info.captureWidth?.toString() ?? '--';
@@ -178,6 +187,11 @@ class _CameraScreenState extends State<CameraScreen> {
           analysisResolution: '${aw}x$ah',
         );
       });
+
+      // Initialize the native stitching engine with the actual resolution.
+      final int analysisW = info.analysisWidth ?? 1600;
+      final int analysisH = info.analysisHeight ?? 1200;
+      await StitchControl.initEngine(analysisW: analysisW, analysisH: analysisH);
 
       final ranges = CameraRanges(
         minFocusDistance: info.minFocusDistance,
@@ -210,6 +224,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
       if (!mounted) return;
       _listenToEvents();
+      _startNavPoll();
     } catch (e) {
       if (!mounted) return;
       _showError('Camera error: $e');
@@ -225,10 +240,32 @@ class _CameraScreenState extends State<CameraScreen> {
     }, onError: (e) => debugPrint('Event stream error: $e'));
   }
 
+  void _startNavPoll() {
+    _navPollTimer?.cancel();
+    _navPollTimer = Timer.periodic(const Duration(milliseconds: 50), (_) async {
+      if (!mounted) return;
+      final state = await StitchControl.getNavigationState();
+      if (!mounted || state == null) return;
+      final bool newFrame = state.framesCaptured > _prevFramesCaptured;
+      if (newFrame) {
+        _prevFramesCaptured = state.framesCaptured;
+        _fetchCanvasPreview();
+      }
+      setState(() => _navState = state);
+    });
+  }
+
+  Future<void> _fetchCanvasPreview() async {
+    final bytes = await StitchControl.getCanvasPreview();
+    if (!mounted || bytes == null) return;
+    setState(() => _canvasPreviewBytes = bytes);
+  }
+
   @override
   void dispose() {
     _eventSub?.cancel();
     _sessionTimer?.cancel();
+    _navPollTimer?.cancel();
     _afFocusSyncTimer?.cancel();
     _settingsQueue.cancel();
     CameraControl.stopCamera();
@@ -439,11 +476,13 @@ class _CameraScreenState extends State<CameraScreen> {
   void _toggleScan() {
     setState(() => _isScanning = !_isScanning);
     if (_isScanning) {
+      StitchControl.startScanning();
       _sessionTimer?.cancel();
       _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() => _sessionSeconds++);
       });
     } else {
+      StitchControl.stopScanning();
       _sessionTimer?.cancel();
     }
   }
@@ -451,10 +490,14 @@ class _CameraScreenState extends State<CameraScreen> {
   void _onReset() {
     setState(() {
       _isScanning = false;
-      _stitchedCount = 0;
+      _navState = NavigationState.empty;
+      _canvasPreviewBytes = null;
+      _prevFramesCaptured = 0;
       _sessionSeconds = 0;
     });
     _sessionTimer?.cancel();
+    StitchControl.stopScanning();
+    StitchControl.resetEngine();
   }
 
   void _onExport() {
@@ -486,7 +529,7 @@ class _CameraScreenState extends State<CameraScreen> {
           child: Stack(
             children: [
               // Canvas — always the base layer (scrollable infinite plane)
-              const Positioned.fill(child: CanvasView()),
+              Positioned.fill(child: CanvasView(previewBytes: _canvasPreviewBytes)),
 
               // Camera preview window — centered, 60 % of screen width.
               // Keep in tree with Visibility to maintain camera stream persistence.
@@ -559,7 +602,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 child: BottomInfoBar(
                   isScanning: _isScanning,
                   frameCount: _info.frameCount,
-                  stitchedCount: _stitchedCount,
+                  stitchedCount: _navState.framesCaptured,
                   totalTarget: 0,
                   coveragePct: 0.0,
                   sessionSeconds: _sessionSeconds,

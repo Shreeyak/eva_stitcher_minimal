@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-17
+
+- **Phase 1 (JNI Zero-Copy + Build Scaffold)**: Replaced ByteArray frame path with ByteBuffer zero-copy JNI; added `jni_bridge.cpp`, `engine.h/cpp`, `canvas.h/cpp`, `types.h`; created `lib/stitcher/stitch_state.dart` (`NavigationState`, `StitchControl`); updated `NativeStitcher.kt` and `MainActivity.kt` with new stitch MethodChannel; camera now requests 1600×1200 analysis and calls `initEngine` after start.
+- **Phase 2 (Navigation Pipeline)**: Added `navigation.h/cpp` with phase correlation (`cv::phaseCorrelate` + Hanning window), velocity EMA + deadband, Laplacian sharpness, tracking FSM (INIT→TRACKING→UNCERTAIN→LOST), and full capture gating (8 checks, structured reason-code logs); wired inline stitch commit path in `Engine::processAnalysisFrame`.
+- Created OpenCV symlink `android/opencv → ../../eva_minimal_demo/android/opencv`; `CanvasView` now accepts `previewBytes` and displays live JPEG preview; nav state polled at 50ms via `Timer.periodic`.
+
 ## 2026-03-14
 
 - Extracted camera stack into reusable Flutter plugin at `packages/eva_camera/` (Dart + Kotlin/CameraX).

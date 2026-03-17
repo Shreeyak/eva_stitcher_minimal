@@ -10,7 +10,7 @@ set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size
 
 # OpenCV_DIR is passed from build.gradle.kts via -DOpenCV_DIR
 # Points to: android/opencv/sdk/native/jni (contains OpenCVConfig.cmake)
-find_package(OpenCV REQUIRED COMPONENTS java)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc video imgcodecs)
 
 # ── System libraries ─────────────────────────────────────────────────────────
 find_library(log-lib log)
@@ -19,7 +19,10 @@ find_library(log-lib log)
 add_library(
     eva_stitcher
     SHARED
-    stitcher_jni.cpp
+    jni_bridge.cpp
+    engine.cpp
+    navigation.cpp
+    canvas.cpp
 )
 
 target_include_directories(eva_stitcher PRIVATE
