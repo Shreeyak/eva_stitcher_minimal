@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-17 (update 14)
+
+- **Rotate image buffers with OpenCV**: CameraX’s `setTargetRotation` is purely metadata, so we now rotate the analysis buffer and nav frames 180° via `cv::rotate`. This keeps the pipeline aligned with the preview while preserving the rotation flag expected by the platform.
+
+## 2026-03-17 (update 13)
+
+- **Disable autofocus for live scanning**: Both the preview and analysis use cases now request `CONTROL_AF_MODE_OFF` via Camera2Interop, and the AF state starts disabled so all capture options run in the same manual-control mode.
+
 ## 2026-03-17 (update 11)
 
 - **Save canvas as single image**: Added `Canvas::saveCanvasAsImage` that composites all tiles into one PNG cropped to the written bounds. Wired through Engine → JNI → Kotlin → Dart. Single file published to `Pictures/EvaWSI/` via MediaStore.

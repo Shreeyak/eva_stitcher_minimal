@@ -142,7 +142,7 @@ class CameraValues {
     this.exposureTimeNs = 1000000,
     this.focusDistance = 0.1,
     this.zoomRatio = 1.0,
-    this.afEnabled = true,
+    this.afEnabled = false,
     this.wbLocked = false,
   });
 
@@ -169,7 +169,7 @@ class CameraValues {
       // abrupt lens movement when AF is first toggled off.
       focusDistance: 0.1,
       zoomRatio: ranges.minZoomRatio,
-      afEnabled: true,
+      afEnabled: false,
       wbLocked: false,
     );
   }

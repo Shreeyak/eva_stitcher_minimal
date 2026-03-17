@@ -76,7 +76,7 @@ class CameraManager(
     private var cameraExecutor: ExecutorService? = null
 
     // ── Camera controls state ───────────────────────────────────────────
-    private var afEnabled: Boolean = true
+    private var afEnabled: Boolean = false
     private var aeEnabled: Boolean = false
     private var wbLocked: Boolean = false
     private var captureIntentPreview: Boolean = true
@@ -264,12 +264,19 @@ class CameraManager(
                     ).build()
 
             // ── Preview ──
-            val preview =
+            val previewBuilder =
                 Preview
                     .Builder()
-                    .setTargetRotation(Surface.ROTATION_0)
-                    .build()
-                    .also { it.setSurfaceProvider(pv.surfaceProvider) }
+            Camera2Interop
+                .Extender(previewBuilder)
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CameraMetadata.CONTROL_AF_MODE_OFF,
+                )
+
+            val preview = previewBuilder
+                .build()
+                .also { it.setSurfaceProvider(pv.surfaceProvider) }
 
             // ── ImageCapture (ZSL, output format from captureFormatYuv state) ──
             val captureBuilder =
@@ -277,7 +284,6 @@ class CameraManager(
                     .Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
                     .setResolutionSelector(captureResolution)
-                    .setTargetRotation(Surface.ROTATION_0)
 
             if (captureFormatYuv) {
                 captureBuilder.setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
@@ -293,11 +299,15 @@ class CameraManager(
                         ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888,
                     ).setBackpressureStrategy(
                         ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST,
-                    ).setTargetRotation(Surface.ROTATION_0)
+                    )
 
             // Attach Camera2 capture callback to snoop live AWB/AF values
             Camera2Interop
                 .Extender(analysisBuilder)
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CameraMetadata.CONTROL_AF_MODE_OFF,
+                )
                 .setSessionCaptureCallback(
                     object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(
