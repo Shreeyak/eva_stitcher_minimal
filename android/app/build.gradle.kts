@@ -48,10 +48,10 @@ android {
         }
     }
 
-    // Wire up CMakeLists for the native stitcher library
+    // Wire up CMakeLists for the native stitcher library (native/stitcher/)
     externalNativeBuild {
         cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
+            path = file("../../native/stitcher/CMakeLists.txt")
             version = "3.22.1"
         }
     }
