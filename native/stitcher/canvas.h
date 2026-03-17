@@ -70,6 +70,10 @@ public:
     // Returns 0 on success, non-zero on error.
     int saveAllTilesToDisk(const std::string& outputDir);
 
+    // Composite all tiles into a single full-resolution PNG at outputPath,
+    // cropped to the written bounds. Returns 0 on success, non-zero on error.
+    int saveCanvasAsImage(const std::string& outputPath);
+
 private:
     int         _frameW   = 0;
     int         _frameH   = 0;

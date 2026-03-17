@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-17 (update 10)
+
+- **Save canvas to Pictures/EvaWSI**: Tiles now saved to public `Pictures/EvaWSI/` via MediaStore (API 29+ scoped storage — no runtime permissions required). Temp tiles written to cache first, then published via `ContentResolver`.
+
+## 2026-03-17 (update 9)
+
+- **Fix permission issue**: Changed canvas save destination from Pictures/EvaWSI (requires WRITE_EXTERNAL_STORAGE) to app cache directory (no permissions needed). Removed permission checks and manifest entries.
+
+## 2026-03-17 (update 8)
+
+- **UI refinements**: Removed unused EXPORT button; renamed SAVE to "SAVE CANVAS"; fixed SAVE CANVAS button to be enabled whenever canvas has data (framesCaptured > 0) rather than always greyed out.
+
 ## 2026-03-17 (update 7)
 
 - **Quality improvements**: (1) Removed static placeholder image from mini-map; (2) Verified frames remain at full 1600×1200 resolution without downscaling; (3) Added "Save Canvas" button to bottom action bar that exports all committed canvas tiles to PNG files in Pictures/EvaWSI/.

@@ -516,12 +516,6 @@ class _CameraScreenState extends State<CameraScreen> {
     StitchControl.resetEngine();
   }
 
-  void _onExport() {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Export not yet implemented')));
-  }
-
   void _onSaveCanvas() async {
     try {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -529,10 +523,14 @@ class _CameraScreenState extends State<CameraScreen> {
       );
       final result = await StitchControl.saveCanvasToDisk();
       if (mounted) {
+        final count = result?['count'] as int?;
+        final saved = result != null && (count ?? 0) > 0;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result != null ? 'Canvas saved successfully!' : 'Save failed'),
-            duration: const Duration(seconds: 2),
+            content: Text(saved
+                ? 'Saved $count tile(s) to Pictures/EvaWSI'
+                : 'Save failed'),
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -742,8 +740,8 @@ class _CameraScreenState extends State<CameraScreen> {
                               onToggleDebugOverlay: () =>
                                   setState(() => _showDebugOverlay = !_showDebugOverlay),
                               onReset: _onReset,
-                              onExport: _onExport,
-                              onSaveCanvas: _onSaveCanvas,                              activeSetting: _activeSetting,
+                              onSaveCanvas: _onSaveCanvas,
+                              activeSetting: _activeSetting,
                               onSettingChipTap: _onSettingChipTap,
                               values: _values,
                               callbacks: _callbacks,

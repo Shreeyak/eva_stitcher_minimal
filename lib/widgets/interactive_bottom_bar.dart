@@ -25,7 +25,6 @@ class InteractiveBottomBar extends StatelessWidget {
   final VoidCallback onToggleCanvas;
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
-  final VoidCallback onExport;
   final VoidCallback onSaveCanvas;
   final ValueChanged<CameraSettingType?> onSettingChipTap;
 
@@ -44,7 +43,6 @@ class InteractiveBottomBar extends StatelessWidget {
     required this.onToggleCanvas,
     required this.onToggleSettings,
     required this.onReset,
-    required this.onExport,
     required this.onSaveCanvas,
     required this.onSettingChipTap,
   });
@@ -75,7 +73,6 @@ class InteractiveBottomBar extends StatelessWidget {
                     onToggleCanvas: onToggleCanvas,
                     onToggleSettings: onToggleSettings,
                     onReset: onReset,
-                    onExport: onExport,
                     onSaveCanvas: onSaveCanvas,
                     onToggleDebugOverlay: onToggleDebugOverlay,
                   ),
@@ -116,7 +113,6 @@ class _MainActionBar extends StatelessWidget {
   final VoidCallback onToggleCanvas;
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
-  final VoidCallback onExport;
   final VoidCallback onSaveCanvas;
   final VoidCallback onToggleDebugOverlay;
 
@@ -129,7 +125,6 @@ class _MainActionBar extends StatelessWidget {
     required this.onToggleCanvas,
     required this.onToggleSettings,
     required this.onReset,
-    required this.onExport,
     required this.onSaveCanvas,
     required this.onToggleDebugOverlay,
   });
@@ -170,15 +165,8 @@ class _MainActionBar extends StatelessWidget {
           ),
           const SizedBox(width: 32),
            BottomBarActionButton(
-             icon: Icons.download_outlined,
-             label: 'EXPORT',
-             isDisabled: !canExport,
-             onTap: canExport ? onExport : null,
-           ),
-           const SizedBox(width: 32),
-           BottomBarActionButton(
              icon: Icons.save_outlined,
-             label: 'SAVE',
+             label: 'SAVE CANVAS',
              isDisabled: !canExport,
              onTap: canExport ? onSaveCanvas : null,
            ),
