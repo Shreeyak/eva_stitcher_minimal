@@ -14,6 +14,7 @@ import 'widgets/canvas_view.dart';
 import 'widgets/camera_control_overlay.dart';
 import 'widgets/mini_map.dart';
 import 'widgets/bottom_bar_buttons.dart';
+import 'widgets/stitch_debug_overlay.dart';
 import 'stitcher/stitch_state.dart';
 
 Future<void> main() async {
@@ -76,6 +77,7 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isScanning = false;
   bool _showCanvas = false;
   bool _settingsDrawerOpen = false;
+  bool _showDebugOverlay = false;
 
   /// Last WB-lock value that was *confirmed* by native (before any pending
   /// optimistic flip). Used to revert the UI if the native call fails.
@@ -95,6 +97,8 @@ class _CameraScreenState extends State<CameraScreen> {
   int _prevFramesCaptured = 0;
   Timer? _navPollTimer;
   Uint8List? _canvasPreviewBytes;
+  int _navPollTicks = 0;
+  String? _navPollError;
 
   @override
   void initState() {
@@ -244,14 +248,26 @@ class _CameraScreenState extends State<CameraScreen> {
     _navPollTimer?.cancel();
     _navPollTimer = Timer.periodic(const Duration(milliseconds: 50), (_) async {
       if (!mounted) return;
-      final state = await StitchControl.getNavigationState();
-      if (!mounted || state == null) return;
-      final bool newFrame = state.framesCaptured > _prevFramesCaptured;
-      if (newFrame) {
-        _prevFramesCaptured = state.framesCaptured;
-        _fetchCanvasPreview();
+      try {
+        final state = await StitchControl.getNavigationState();
+        if (!mounted || state == null) return;
+        final bool newFrame = state.framesCaptured > _prevFramesCaptured;
+        if (newFrame) {
+          _prevFramesCaptured = state.framesCaptured;
+          _fetchCanvasPreview();
+        }
+        setState(() {
+          _navState = state;
+          _navPollTicks++;
+          _navPollError = null;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _navPollTicks++;
+          _navPollError = e.toString();
+        });
       }
-      setState(() => _navState = state);
     });
   }
 
@@ -624,6 +640,18 @@ class _CameraScreenState extends State<CameraScreen> {
                 ),
               ),
 
+              // Debug overlay — below MiniMap, hidden when not active or in canvas mode
+              if (_showDebugOverlay && !_showCanvas)
+                Positioned(
+                  top: 44 + 130 + 6, // MiniMap top + MiniMap height + gap
+                  right: 8,
+                  child: StitchDebugOverlay(
+                    navState: _navState,
+                    pollTicks: _navPollTicks,
+                    pollError: _navPollError,
+                  ),
+                ),
+
               // All bottom controls pinned to the bottom of the screen
               Positioned(
                 left: 0,
@@ -683,10 +711,13 @@ class _CameraScreenState extends State<CameraScreen> {
                               isScanning: _isScanning,
                               showCanvas: _showCanvas,
                               isSettingsOpen: _settingsDrawerOpen,
+                              showDebugOverlay: _showDebugOverlay,
                               onToggleScan: _toggleScan,
                               onToggleCanvas: () =>
                                   setState(() => _showCanvas = !_showCanvas),
                               onToggleSettings: _toggleSettingsDrawer,
+                              onToggleDebugOverlay: () =>
+                                  setState(() => _showDebugOverlay = !_showDebugOverlay),
                               onReset: _onReset,
                               onExport: _onExport,
                               activeSetting: _activeSetting,

@@ -20,9 +20,12 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-
-        // ── Analysis frame processor — zero-copy ByteBuffer path ───────────
+        // ── Register frame processors BEFORE super.configureFlutterEngine ─────
+        // super.configureFlutterEngine calls onAttachedToActivity synchronously,
+        // which creates CameraManager and copies companion processor references
+        // into instance fields at that moment. If we called set* after super,
+        // CameraManager would capture null and analysis frames would be silently
+        // dropped (frameProcessor ?: return in processFrame).
         EvaCameraPlugin.setFrameProcessor(
             object : FrameProcessor {
                 override fun processFrame(
@@ -42,7 +45,6 @@ class MainActivity : FlutterActivity() {
             },
         )
 
-        // ── Photo capture processor (debug only) ───────────────────────────
         EvaCameraPlugin.setPhotoCaptureProcessor(
             object : PhotoCaptureProcessor {
                 override fun onPhotoCapture(
@@ -65,6 +67,8 @@ class MainActivity : FlutterActivity() {
                 }
             },
         )
+
+        super.configureFlutterEngine(flutterEngine)
 
         // ── Stitch MethodChannel ───────────────────────────────────────────
         MethodChannel(

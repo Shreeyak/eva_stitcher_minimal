@@ -159,8 +159,8 @@ class CameraValues {
   /// Edit defaults here — not scattered across `_startCamera()`.
   factory CameraValues.initialFromRanges(CameraRanges ranges) {
     return CameraValues(
-      isoValue: 800.clamp(ranges.isoRange[0], ranges.isoRange[1]),
-      exposureTimeNs: 20000000.clamp(
+      isoValue: 100.clamp(ranges.isoRange[0], ranges.isoRange[1]),
+      exposureTimeNs: 250000.clamp(    // 1/4000 s
         ranges.exposureTimeRangeNs[0],
         ranges.exposureTimeRangeNs[1],
       ),

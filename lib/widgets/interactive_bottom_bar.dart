@@ -12,6 +12,8 @@ class InteractiveBottomBar extends StatelessWidget {
   final bool showCanvas;
   final bool isSettingsOpen;
   final bool canExport;
+  final bool showDebugOverlay;
+  final VoidCallback onToggleDebugOverlay;
 
   // Settings bar specifics
   final CameraSettingType? activeSetting;
@@ -32,6 +34,8 @@ class InteractiveBottomBar extends StatelessWidget {
     required this.showCanvas,
     required this.isSettingsOpen,
     required this.canExport,
+    required this.showDebugOverlay,
+    required this.onToggleDebugOverlay,
     required this.activeSetting,
     required this.values,
     required this.callbacks,
@@ -64,11 +68,13 @@ class InteractiveBottomBar extends StatelessWidget {
                     isScanning: isScanning,
                     showCanvas: showCanvas,
                     canExport: canExport,
+                    showDebugOverlay: showDebugOverlay,
                     onToggleScan: onToggleScan,
                     onToggleCanvas: onToggleCanvas,
                     onToggleSettings: onToggleSettings,
                     onReset: onReset,
                     onExport: onExport,
+                    onToggleDebugOverlay: onToggleDebugOverlay,
                   ),
                 ),
               ),
@@ -102,21 +108,25 @@ class _MainActionBar extends StatelessWidget {
   final bool isScanning;
   final bool showCanvas;
   final bool canExport;
+  final bool showDebugOverlay;
   final VoidCallback onToggleScan;
   final VoidCallback onToggleCanvas;
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
   final VoidCallback onExport;
+  final VoidCallback onToggleDebugOverlay;
 
   const _MainActionBar({
     required this.isScanning,
     required this.showCanvas,
     required this.canExport,
+    required this.showDebugOverlay,
     required this.onToggleScan,
     required this.onToggleCanvas,
     required this.onToggleSettings,
     required this.onReset,
     required this.onExport,
+    required this.onToggleDebugOverlay,
   });
 
   @override
@@ -159,6 +169,13 @@ class _MainActionBar extends StatelessWidget {
             label: 'EXPORT',
             isDisabled: !canExport,
             onTap: canExport ? onExport : null,
+          ),
+          const SizedBox(width: 32),
+          BottomBarActionButton(
+            icon: Icons.bug_report_outlined,
+            label: 'DEBUG',
+            isActive: showDebugOverlay,
+            onTap: onToggleDebugOverlay,
           ),
 
           const Spacer(),

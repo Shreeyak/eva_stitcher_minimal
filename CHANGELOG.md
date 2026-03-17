@@ -3,6 +3,7 @@
 ## 2026-03-17 (update 3)
 
 - **Phase 3 (Tiled Canvas + Compositing)**: Replaced 4096×4096 monolithic stub with an `unordered_map`-backed LRU tile cache (`CV_8UC3` BGR pixels + `CV_8UC1` mask per tile — no alpha channel). Feather weight map pre-computed once at init via OpenCV mat ops. `compositeFrame` splits each tile subregion into interior (w=1, direct overwrite) and feather-band strips (w<1, blend only written pixels; direct copy for empty); float arithmetic is confined to the narrow feather band only. LRU eviction flushes dirty tiles to PNG on disk; `getTile` reloads from disk on cache miss. `renderPreview` uses a shared lock; `compositeFrame`/`reset` use exclusive lock; `getOverlapRatio` is lock-free (analysis thread only). `initEngine` now accepts a `cacheDir` string propagated from `MainActivity.kt` (`filesDir/tile_cache`) through JNI → `Engine::init` → `Canvas::init`.
+- **Phase 4 (Stitch Commit Wiring)**: Fixed lock-order inversion in `Engine::processAnalysisFrame` — `_canvas->getBounds()` (acquires `_canvasMutex`) is now called before `_stateMutex` is taken, preventing deadlock against `renderPreview` on the main thread. Canvas bounds (`canvasMinX/Y/MaxX/Y`) are now populated in `NavigationState` every frame and refreshed after each commit. Commit timing log now reports individual steps: `downscaleMs`, `compositeMs`, `totalMs`.
 
 ## 2026-03-17 (update 2)
 

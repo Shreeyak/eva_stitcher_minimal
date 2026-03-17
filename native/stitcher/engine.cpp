@@ -56,39 +56,57 @@ void Engine::processAnalysisFrame(
     // ── Step 1: Extract G channel + downscale → 640×480 nav frame ─────────
     cv::Mat navFrame = extractGreenDownscale(framePtr, w, h, stride);
 
-    // TODO(phase2-rotation): apply rotation if needed before nav
+    // TODO(phase8): apply rotation for non-0° devices
     (void)rotation;
 
     // ── Step 2: Navigation (phase correlation, velocity, gating) ──────────
     const bool triggerCommit = _nav->processFrame(navFrame, timestampNs, _scanningActive, _canvas.get());
 
-    // ── Step 3: Pack NavigationState under mutex ───────────────────────────
+    // ── Step 3: Pack NavigationState ──────────────────────────────────────
+    // getBounds() acquires _canvasMutex (shared). We must NOT hold _stateMutex
+    // at that point: the main thread may hold _canvasMutex (renderPreview) and
+    // then call getNavigationState() which acquires _stateMutex — deadlock.
+    // Safe order: query canvas bounds first, then lock _stateMutex to write.
+    NavigationState snap = _nav->getState();
+    snap.analysisTimeMs = static_cast<float>(nowMs() - t0);
+    _canvas->getBounds(snap.canvasMinX, snap.canvasMinY,
+                       snap.canvasMaxX, snap.canvasMaxY);
     {
         std::lock_guard<std::mutex> lock(_stateMutex);
-        _navState = _nav->getState();
-        _navState.analysisTimeMs = static_cast<float>(nowMs() - t0);
+        _navState = snap;
     }
 
     // ── Step 4: Inline stitch commit when gating passes ───────────────────
     if (triggerCommit && !_captureInProgress) {
         _captureInProgress = true;
 
-        const int64_t tCommit0 = nowMs();
-
-        // Downscale RGBA → 800×600 BGR canvas frame
+        const int64_t tDownscale = nowMs();
         cv::Mat canvasFrame = downscaleFrame(framePtr, w, h, stride);
+        const int64_t downscaleMs = nowMs() - tDownscale;
 
         Pose pose = _nav->getCurrentPose();
+
+        const int64_t tComposite = nowMs();
         _canvas->compositeFrame(canvasFrame, pose);
+        const int64_t compositeMs = nowMs() - tComposite;
+
         _nav->onFrameCommitted();
         _captureInProgress = false;
 
-        const int64_t commitMs = nowMs() - tCommit0;
-        LOGI("processAnalysisFrame commit: totalMs=%lld", (long long)commitMs);
+        LOGI("processAnalysisFrame commit: downscaleMs=%lld compositeMs=%lld totalMs=%lld",
+             (long long)downscaleMs, (long long)compositeMs,
+             (long long)(nowMs() - t0));
 
-        std::lock_guard<std::mutex> lock(_stateMutex);
-        _navState.compositeTimeMs = static_cast<float>(commitMs);
-        _navState.framesCaptured  = _nav->getState().framesCaptured;
+        // Refresh navState with updated framesCaptured and canvas bounds
+        NavigationState commitSnap = _nav->getState();
+        commitSnap.analysisTimeMs  = snap.analysisTimeMs;
+        commitSnap.compositeTimeMs = static_cast<float>(compositeMs);
+        _canvas->getBounds(commitSnap.canvasMinX, commitSnap.canvasMinY,
+                           commitSnap.canvasMaxX, commitSnap.canvasMaxY);
+        {
+            std::lock_guard<std::mutex> lock(_stateMutex);
+            _navState = commitSnap;
+        }
     }
 }
 
