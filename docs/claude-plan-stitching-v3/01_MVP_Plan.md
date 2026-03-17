@@ -3,62 +3,15 @@
 **Date**: 2025-07-10
 **Prerequisite**: Current branch `stitch1` — `native/stitcher/` and `lib/stitcher/` are empty. Camera plugin (`eva_camera`) provides two-stream CameraX (Preview + ImageAnalysis) with configurable resolution via `startCamera()`. ImageCapture is retained only for the debug capture button and does not participate in stitching.
 
-## 6) What changed from older plans
-
-### Compared to v1 plan (`claude-plan-stitching/`)
-
-| Area | v1 (claude-plan-stitching) | v3 |
-|------|----------------------------|-----|
-| **Analysis resolution** | 640×480 YUV (navigation only) | 1600×1200 target with fallback negotiation |
-| **Capture resolution** | 3120×2160 full-res for stitching | Analysis YUV 40% center crop (~640×480) → resize 800×600 for stitch commit |
-| **Crop policy** | No center crop; full-frame processing | 40% width × 40% height center crop for both streams |
-| **Scale bridge** | capture/analysis = 3120/640 ≈ 4.875 | Computed from actual resolutions; not hardcoded |
-| **Stitch registration** | Phase correlation on full-res capture (13MP FFT) | Phase correlation on 800×600 stitch frame; ECC refinement in MVP |
-| **ECC** | Deferred to Phase 2 | Included in MVP Phase 5 with runtime guardrails |
-| **Quality formula** | Phase correlation confidence only (peak/mean ≈ 0.15 threshold) | Cubic-root: ∛(confidence × sharpness × overlapRatio) |
-| **Gating** | Velocity + distance + stability + tracking + cooldown | Adds sharpness, overlap, reason codes, structured log schema |
-| **First frame** | Special case: pose=(0,0), no registration, direct write | Full gating required; overlap deadlock prevented via canvasEmpty state machine |
-| **Coordinate system** | World coords at first frame center; tiles 1024×1024 | Canvas-only coords; no world layer in MVP |
-| **Vignetting** | In MVP scope (radial gain model) | Deferred to future plan |
-| **Blending** | Linear feathering (scalar loops) | Linear feathering (OpenCV mat ops; no scalar loops) |
-| **Zero-copy** | Y-channel zero-cost extraction; capture requires YUV→RGB copy | ByteBuffer JNI zero-copy for analysis stream (Y for nav, Y+U+V for stitch commit); ByteArray copies forbidden |
-| **Two-stream alignment** | Implicit two-stream (analysis + capture) | Two-stream (Preview + Analysis); stitch commit uses analysis YUV inline; ImageCapture debug-only |
-| **Transform ownership** | Navigation owns dead-reckoning, stitch owns refinement | Explicit CameraX-first ownership table with no-duplicate rule and startup assertion |
-| **Latency** | Full-res FFT on 13MP caused ~2.5s latency (identified in 07) | Crop-early strategy targets <300ms; full-res PCR removed |
-| **UI** | Velocity border/bar, capture flash, mini-map, LOST warning | Adds quality bar, BLURRY indicator, preview border pulse (replaces full-screen flash), InfoBar confidence |
-| **Phase structure** | Phase 1 MVP + Phase 2 deferred (2 large phases) | 8 small phases, each independently testable with verification steps |
-| **Logging** | Ad-hoc confidence and state logs | Structured schema: STREAM_ALIGN, CAPTURE_GATE, POSE, COMMIT, UI_STATUS, LATENCY, ANALYSIS_RESOLUTION |
-
-**Key v1 lessons incorporated into v3:**
-
-1. Capture delay investigation (doc 07) showed full-res PCR was the primary bottleneck — v3 eliminates it by cropping to 800×600 before registration.
-2. First-frame distance check bug (doc 06) — v3 handles first-frame semantics explicitly via the canvasEmpty state machine rather than a special-case bypass.
-3. Phase correlation confidence alone was insufficient for quality gating — v3 adds sharpness and overlap to the formula.
-4. Scalar per-pixel blending loops caused ~300-700ms overhead — v3 mandates OpenCV mat operations.
-
-### Compared to v2 plans (`claude-plan-stitching-v2`)
-
-1. Three-stream effective framing alignment is elevated to a hard contract.
-2. Explicit crop/resize contract is fixed: capture `1600x1200 -> 800x600`; analysis target `1600x1200` with strict fallback policy.
-3. 40% width/height crop policy is mandatory and documented for both capture and analysis.
-4. CameraX-first transform ownership is explicit; no contradictory transform duplication allowed.
-5. First committed frame after Start must pass full gating (tightened behavior).
-6. ECC full-resolution refinement moved into MVP (not deferred).
-7. ByteBuffer minimal-copy and latency-focused constraints are explicit from capture-delay investigation findings.
-8. Quality formula and overlap-zero behavior are strict and testable.
-9. UI contract now explicitly mandates subtle border pulse, FRAMES correctness, velocity/quality bars, and InfoBar confidence display.
-10. MVP explicitly excludes image corrections.
-11. ImageCapture removed from stitch path; stitching uses ImageAnalysis frames inline (latency: ~300ms → ~98ms).
-
 ## Core Design Decisions
 
 ### Stream Alignment — Two-Stream / ImageAnalysis-Only
 
-Preview and ImageAnalysis represent the same effective scene region (same center crop and aspect framing). ImageCapture is bound only for the debug capture button and plays no role in stitching.
+Preview and ImageAnalysis represent the same effective scene region. ImageCapture is bound only for the debug capture button and plays no role in stitching.
 
-**CameraX behavior**: When use cases are bound together via `bindToLifecycle()`, CameraX negotiates a shared sensor region. Each use case may receive a differently-sized output depending on its resolution strategy. **CameraX does NOT guarantee identical crop rects** — different aspect ratios or resolutions may cause different sensor crop regions.
+**CameraX SCALAR_CROP strategy**: ImageAnalysis requests the full sensor resolution (~4160×3120). We pass the `SCALAR_CROP` parameter to CameraX to center-crop the sensor down to **1600×1200**. CameraX performs this crop at the hardware/ISP level before delivering frames — no software crop needed. ImageAnalysis therefore receives **1600×1200 RGBA8888** frames directly.
 
-**Our strategy**: Software center-crop. Apply the same **proportional 40% width × 40% height** center crop to the analysis output. The analysis frame serves both navigation (Y channel only) and stitch commit (YUV→BGR, same crop region). Preview is display-only and does not need pixel-level alignment.
+The analysis frame serves both navigation (G channel only — high contrast for H&E stained slides) and stitch commit (RGBA downscale). Preview is display-only and does not need pixel-level alignment.
 
 ### Coordinate System — Canvas Only
 
@@ -74,47 +27,39 @@ No vignetting correction, lens distortion correction, or other image corrections
 
 ### Frame Processing Pipeline
 
-The analysis frame serves as the single source for both navigation (Y channel) and stitch commit (YUV→BGR, same crop region).
+The analysis frame serves as the single source for both navigation (G channel) and stitch commit (RGBA downscale).
 
 | Stage | Analysis (ImageAnalysis) |
 |-------|-------------------------|
-| Sensor raw | ~1600×1200 requested (actual varies by device) |
-| Center crop 40% | 40%W × 40%H of actual |
-| Nav frame | ~640×480 Y-only → phase correlation |
-| Stitch frame | ~640×480 YUV→BGR → resize to 800×600 |
+| Sensor raw | ~4160×3120 (full sensor, 4K) |
+| CameraX SCALAR_CROP | Center-cropped to 1600×1200 at ISP level |
+| Format | RGBA8888 (single plane, 4 bytes/pixel) |
+| Nav frame | 1600×1200 → extract G channel → downscale to 640×480 grayscale |
+| Stitch frame | 1600×1200 → downscale RGBA to 800×600 |
 | Use | Nav: motion tracking; Commit: composited onto tiled canvas |
 
-The crop ratio is **40% of the native frame** for the analysis stream.
+Frames arrive from CameraX already cropped to 1600×1200 via `SCALAR_CROP`. No software center-crop is needed.
 
-**Crop dimensions computed at init** from actual CameraX-returned resolutions:
+**Nav frame**: Extract the green channel from the 1600×1200 RGBA frame (G provides high contrast for H&E stained slides), then downscale to 640×480. Phase correlation runs at 640×480 grayscale.
 
-```
-analysisCropW = round_even(analysisW × 0.40) // e.g. 1600 × 0.40 = 640
-analysisCropH = round_even(analysisH × 0.40) // e.g. 1200 × 0.40 = 480
-```
+**Stitch frame**: Downscale the full 1600×1200 RGBA frame to 800×600. No color conversion needed — RGBA is used directly (OpenCV `RGBA2BGR` or `RGBA2BGRA` only if needed for canvas tile format).
 
-The final canvas frame is always resized to **800×600** (4:3). The nav frame is used at its post-crop size (varies by device, typically ~640×480).
-
-**Navigation scale**: `navScale = CANVAS_FRAME_W / navFrameW = 800.0 / analysisCropW`.
+**Navigation scale**: `navScale = CANVAS_FRAME_W / NAV_FRAME_W = 800.0 / 640.0 = 1.25`.
 
 ### Analysis Resolution Strategy
 
-Request **1600×1200** from CameraX via `startCamera(analysisWidth: 1600, analysisHeight: 1200)`. CameraX uses `FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER` — may return 1920×1440, 1600×1200, 1280×960, etc.
+Request **full sensor resolution** (~4160×3120) from CameraX via `startCamera()` with maximum analysis resolution. Then set the `SCALAR_CROP` CameraX parameter to center-crop the sensor to **1600×1200** (4:3). CameraX performs this crop at the ISP level before delivering frames to ImageAnalysis.
 
-The plan adapts to whatever CameraX returns by computing crop dimensions from the actual resolution. The 40% crop ratio guarantees matching FoV regardless of the exact analysis resolution.
+The SCALAR_CROP region is always 1600×1200 (4:3). If the sensor aspect ratio differs, the crop is centered within the sensor area. The nav and stitch frame dimensions (640×480 and 800×600) are fixed constants, not computed from variable CameraX output.
 
-**Fallback guarantee**: If a device returns an unusual resolution, the only requirement is that it's 4:3 (or close). If the aspect ratio differs significantly, the crop dimensions are computed to produce 4:3 output:
-
-```
-cropH = round_even(analysisW × 0.40 × 3 / 4)  // force 4:3 from crop dimensions
-```
+**Fallback**: If a device doesn't support SCALAR_CROP or returns a different resolution, fall back to requesting 1600×1200 directly via `startCamera(analysisWidth: 1600, analysisHeight: 1200)` and adapt nav/stitch downscale ratios from the actual resolution returned.
 
 ### Minimizing Copies — ByteBuffer Zero-Copy
 
-1. **Kotlin → JNI**: Pass `ImageProxy.planes[].buffer` (direct ByteBuffer) to JNI. Use `GetDirectBufferAddress()` for zero-copy pointer access. **No ByteArray allocations.**
-2. **Crop before conversion**: Read only center 40% rows from Y/U/V planes. Skip outer rows entirely.
-3. **YUV→BGR on cropped region only**: Convert the crop, not the full sensor frame.
-4. **Single downscale**: Resize cropped BGR → 800×600. One resize operation.
+1. **Kotlin → JNI**: Pass `ImageProxy.planes[0].buffer` (single RGBA8888 direct ByteBuffer) to JNI. Use `GetDirectBufferAddress()` for zero-copy pointer access. **No ByteArray allocations.**
+2. **Wrap as cv::Mat**: Create `cv::Mat(h, w, CV_8UC4, rgbaPtr, stride)` — zero-copy, no pixel data copied.
+3. **Nav path**: Extract G channel (`cv::extractChannel` or manual stride) + `cv::resize` → 640×480 grayscale.
+4. **Stitch path**: `cv::resize` RGBA → 800×600 + `cv::cvtColor(RGBA2BGR)` for canvas tile format. One resize + one conversion.
 
 ### Quality Formula
 
@@ -209,9 +154,10 @@ android {
 **`types.h`** — constants, enums, core structs:
 
 ```cpp
-constexpr float CROP_RATIO = 0.40f;
 constexpr int CANVAS_FRAME_W = 800;
 constexpr int CANVAS_FRAME_H = 600;
+constexpr int NAV_FRAME_W = 640;
+constexpr int NAV_FRAME_H = 480;
 constexpr int TILE_SIZE = 512;
 constexpr int MAX_CACHED_TILES = 100;
 constexpr int FEATHER_WIDTH = 80;          // 10% of 800px
@@ -263,7 +209,7 @@ struct NavigationState {
 
 `jni_bridge.cpp`:
 
-- `processAnalysisFrame(jobject yBuf, jobject uBuf, jobject vBuf, jint w, jint h, jint yStride, jint uvStride, jint uvPixelStride, jint rotation, jlong timestampNs)` → `void`
+- `processAnalysisFrame(jobject rgbaBuf, jint w, jint h, jint stride, jint rotation, jlong timestampNs)` → `void`
 - `getNavigationState()` → `jfloatArray`
 - `initEngine(jint analysisW, jint analysisH)` → `void`
 - `getCanvasPreview(jint maxDim)` → `jbyteArray` (JPEG)
@@ -271,20 +217,18 @@ struct NavigationState {
 - `startScanning()` → `void`
 - `stopScanning()` → `void`
 
-Note: `processAnalysisFrame` now accepts Y+U+V planes so the stitch commit path (YUV→BGR) can run inline when gating passes. Returns `void` — no Kotlin-side capture trigger needed.
+Note: `processAnalysisFrame` receives a single RGBA8888 ByteBuffer (already cropped to 1600×1200 by CameraX SCALAR_CROP). G channel is extracted in C++ for navigation; RGBA is downscaled for stitch commit. Returns `void` — no Kotlin-side capture trigger needed.
 
-### Step 1.3 — Crop helpers in `engine.cpp`
+### Step 1.3 — Frame processing helpers in `engine.cpp`
 
-- `cropY(yPtr, sensorW, sensorH, yStride, cropW, cropH)` → `cv::Mat` (CV_8UC1). Copies only center rows. Used for nav frame every analysis frame.
-- `cropYuvToBgr(yPtr, uPtr, vPtr, sensorW, sensorH, yStride, uvStride, uvPixelStride, cropW, cropH)` → `cv::Mat` (CV_8UC3). Crops center then converts. Used for stitch commit (inline in `processAnalysisFrame` when gating passes).
-
-Both compute offset: `offsetX = (sensorW - cropW) / 2`, `offsetY = (sensorH - cropH) / 2`.
+- `extractGreenDownscale(rgbaPtr, w, h, stride)` → `cv::Mat` (CV_8UC1, 640×480). Wraps RGBA data as `cv::Mat(h, w, CV_8UC4, rgbaPtr, stride)`, extracts G channel via `cv::extractChannel(..., 1)`, then `cv::resize` to 640×480. Used for nav frame every analysis frame.
+- `downscaleRgba(rgbaPtr, w, h, stride)` → `cv::Mat` (CV_8UC3, 800×600). Wraps RGBA as cv::Mat, `cv::resize` to 800×600, then `cv::cvtColor(RGBA2BGR)` for canvas tile format. Used for stitch commit (inline in `processAnalysisFrame` when gating passes).
 
 ### Step 1.4 — Update NativeStitcher.kt
 
 Replace `processFrame(ByteArray...)` with ByteBuffer-based signatures:
 
-- `processAnalysisFrame(yBuf: ByteBuffer, uBuf: ByteBuffer, vBuf: ByteBuffer, w: Int, h: Int, yStride: Int, uvStride: Int, uvPixelStride: Int, rotation: Int, timestampNs: Long)`
+- `processAnalysisFrame(rgbaBuf: ByteBuffer, w: Int, h: Int, stride: Int, rotation: Int, timestampNs: Long)`
 - `getNavigationState(): FloatArray`
 - `initEngine(analysisW: Int, analysisH: Int)`
 - `getCanvasPreview(maxDim: Int): ByteArray?`
@@ -295,19 +239,15 @@ All declared as `external fun` with `@JvmStatic` in companion object.
 
 ### Step 1.5 — Update MainActivity.kt
 
-**FrameProcessor**: Pass all three YUV plane ByteBuffers. The C++ side uses Y-only for nav every frame, and Y+U+V for stitch commit when gating passes:
+**FrameProcessor**: Pass the single RGBA8888 ByteBuffer. CameraX delivers RGBA frames with a single plane:
 
 ```kotlin
 EvaCameraPlugin.setFrameProcessor(object : FrameProcessor {
     override fun processFrame(imageProxy: ImageProxy, captureResult: TotalCaptureResult?): Float {
         NativeStitcher.processAnalysisFrame(
             imageProxy.planes[0].buffer,
-            imageProxy.planes[1].buffer,
-            imageProxy.planes[2].buffer,
             imageProxy.width, imageProxy.height,
             imageProxy.planes[0].rowStride,
-            imageProxy.planes[1].rowStride,
-            imageProxy.planes[1].pixelStride,
             imageProxy.imageInfo.rotationDegrees,
             imageProxy.imageInfo.timestamp
         )
@@ -327,31 +267,33 @@ EvaCameraPlugin.setFrameProcessor(object : FrameProcessor {
 
 **InitEngine call**: After camera starts, call `initEngine` with actual capture/analysis resolutions (from `CameraStartInfo` returned by `startCamera()`).
 
-### Step 1.6 — Request 1600×1200 analysis resolution
+### Step 1.6 — Request 4K analysis + SCALAR_CROP
 
-In `lib/main.dart`, change `CameraControl.startCamera()` to:
+In `lib/main.dart`, request maximum analysis resolution and set SCALAR_CROP:
 
 ```dart
-final info = await CameraControl.startCamera(analysisWidth: 1600, analysisHeight: 1200);
+final info = await CameraControl.startCamera(
+    analysisWidth: 4160, analysisHeight: 3120,  // request full sensor
+);
+// After camera starts, set SCALAR_CROP to 1600×1200
+await CameraControl.setScalarCrop(1600, 1200);
 ```
 
-After receiving `info`, call `StitchControl.initEngine()` with actual analysis resolution:
+After receiving `info`, call `StitchControl.initEngine()` with the cropped analysis resolution:
 
 ```dart
 await StitchControl.initEngine(
-    analysisW: info.analysisWidth, analysisH: info.analysisHeight,
+    analysisW: 1600, analysisH: 1200,  // post-SCALAR_CROP dimensions
 );
 ```
 
-**Resolution verification**: Log the actual resolutions CameraX returns. If analysis resolution differs from 1600×1200, the system adapts gracefully because crop and scale are computed from actual values.
+**Resolution verification**: Log the actual SCALAR_CROP region CameraX applies. If the device doesn't support SCALAR_CROP, fall back to requesting 1600×1200 directly.
 
 ### Verification
 
-- Logcat: "initEngine: capture=%dx%d analysis=%dx%d crop=%.0f%%" — shows actual resolutions and computed crop dimensions.
-- Logcat: "processAnalysisFrame: sensor=%dx%d crop=%dx%d navFrame=%dx%d" on first frame.
-- fallback path includes reason + closeness score when used,
-- if selected resolution differs from requested, downstream crop dimensions and analysis-to-canvas scale bridge constants are recomputed from actual resolution (not hardcoded to 1600x1200 assumptions),
-- `STREAM_ALIGN` snapshot reflects actual selected analysis size (not target size).
+- Logcat: "initEngine: analysis=%dx%d (post-SCALAR_CROP)" — shows actual cropped resolution.
+- Logcat: "processAnalysisFrame: frame=%dx%d navFrame=640x480" on first frame.
+- If SCALAR_CROP fallback is used, downstream nav/stitch dimensions adapt from actual resolution.
 - **No** `NativeAlloc concurrent mark compact GC` entries from camera frame copies.
 - `processAnalysisFrame` called at ~30fps (verify with frame counter log every 100 frames).
 - Native library loads without linker errors (OpenCV symbols resolve).
@@ -366,7 +308,7 @@ await StitchControl.initEngine(
 
 Class `Navigation`:
 
-- `init(canvasFrameW, canvasFrameH, navFrameW, navFrameH)` — compute `_scale = canvasFrameW / navFrameW`.
+- `init(canvasFrameW, canvasFrameH, navFrameW, navFrameH)` — compute `_scale = canvasFrameW / navFrameW` (= 800/640 = 1.25).
 - `processFrame(navFrame: cv::Mat, rotation: int, timestampNs: int64_t)` → `NavigationResult`
 - Internal state: `_prevFrame`, `_pose`, `_lastCapturePose`, `_velocity`, `_trackingState`, `_frameCount`, `_framesCaptured`, `_lastConfidence`, `_sharpness`, `_scanningActive`
 
@@ -466,21 +408,19 @@ State struct packed as `float[19]` for JNI:
 
 `Engine::processAnalysisFrame()`:
 
-1. `GetDirectBufferAddress(yBuf)` → `uint8_t* yPtr`
+1. `GetDirectBufferAddress(rgbaBuf)` → `uint8_t* rgbaPtr`
 2. Apply rotation if needed (from `imageInfo.rotationDegrees`)
-3. `cropY()` → center crop of analysis sensor → nav frame (~640×480)
+3. `extractGreenDownscale()` → 640×480 grayscale nav frame (G channel of 1600×1200 RGBA)
 4. Pass to `_nav.processFrame()` (motion + gating)
 5. If `_nav.captureReady && _scanningActive`:
-   a. `GetDirectBufferAddress()` on U and V ByteBuffers → `uint8_t* uPtr, vPtr`
-   b. `cropYuvToBgr()` → center crop of analysis sensor → BGR mat (~640×480)
-   c. `cv::resize()` → 800×600 canvas frame
-   d. Read pose from `_nav.getCurrentPose()` (under `_stateMutex`)
-   e. Call `_canvas.compositeFrame(frame800x600, pose)` (includes ECC)
-   f. Increment `_nav._framesCaptured`, set `_captureInProgress = false`
-   g. Log: `"processAnalysisFrame commit: cropMs=%d convertMs=%d resizeMs=%d compositeMs=%d totalMs=%d"`
+   a. `downscaleRgba()` → 800×600 BGR canvas frame (resize 1600×1200 RGBA + RGBA2BGR)
+   b. Read pose from `_nav.getCurrentPose()` (under `_stateMutex`)
+   c. Call `_canvas.compositeFrame(frame800x600, pose)` (includes ECC)
+   d. Increment `_nav._framesCaptured`, set `_captureInProgress = false`
+   e. Log: `"processAnalysisFrame commit: navMs=%d downscaleMs=%d compositeMs=%d totalMs=%d"`
 6. Return `void`.
 
-**Stitch commit contract**: The YUV→BGR crop, resize, ECC, and compositing all happen inline within `processAnalysisFrame`. No Kotlin-side capture trigger needed. Both U and V planes were passed from Kotlin along with Y, so all data is available. Commit frames are rare (~1 per stable position) so the extra per-commit cost does not affect steady-state ~30fps analysis throughput.
+**Stitch commit contract**: The RGBA downscale, color conversion, ECC, and compositing all happen inline within `processAnalysisFrame`. No Kotlin-side capture trigger needed. The single RGBA ByteBuffer was passed from Kotlin, so all data is available. Commit frames are rare (~1 per stable position) so the extra per-commit cost does not affect steady-state ~30fps analysis throughput.
 
 ### Verification
 
@@ -598,8 +538,8 @@ Flow:
 
 1. C++ `Engine::processAnalysisFrame()` runs navigation + gating.
 2. If gating passes → set `_captureInProgress = true`.
-3. `cropYuvToBgr()` on the analysis frame’s U/V planes (already available in same call).
-4. `cv::resize()` → 800×600 canvas frame.
+3. `downscaleRgba()` on the 1600×1200 RGBA frame (already available as the same ByteBuffer).
+4. Result: 800×600 BGR canvas frame.
 5. Read pose from `_nav.getCurrentPose()`.
 6. `_canvas.compositeFrame()` (includes ECC refinement).
 7. Increment `_nav._framesCaptured`, reset `_captureInProgress = false`.
@@ -611,15 +551,15 @@ Flow:
 
 When commit path is active (gating passed):
 
-1. `GetDirectBufferAddress()` on U and V ByteBuffers.
-2. `cropYuvToBgr()` → center crop of analysis sensor → BGR mat (~640×480).
-3. Apply rotation if needed.
-4. `cv::resize()` → 800×600 (canvas frame).
+1. Wrap RGBA ByteBuffer as `cv::Mat(h, w, CV_8UC4, rgbaPtr, stride)` — zero-copy.
+2. `cv::resize()` → 800×600 RGBA.
+3. `cv::cvtColor(RGBA2BGR)` → 800×600 BGR (canvas tile format).
+4. Apply rotation if needed.
 5. Read pose from `_nav.getCurrentPose()` (under `_stateMutex`).
 6. Call `_canvas.compositeFrame(frame800x600, pose)` — ECC + blend.
 7. Increment `_nav._framesCaptured`.
 8. Reset `_captureInProgress = false`.
-9. Log timing: `processAnalysisFrame commit: cropMs=%d convertMs=%d resizeMs=%d eccMs=%d compositeMs=%d totalMs=%d`.
+9. Log timing: `processAnalysisFrame commit: downscaleMs=%d convertMs=%d eccMs=%d compositeMs=%d totalMs=%d`.
 
 ### Step 4.3 — Dart polling for NavigationState
 
@@ -837,8 +777,8 @@ Rename `lib/widgets/bottom_info_bar.dart` → `lib/widgets/info_bar.dart`, class
 Vertical bar next to camera preview (left side):
 
 - Height proportional to velocity.
-- Max height = 80% of cropped ImageAnalysis height (because velocity is computed from analysis frames).
-- In canvas-pixel units: max displayable velocity = `0.80 × analysisCropH × navScale`.
+- Max height = 80% of nav frame height (because velocity is computed from analysis frames).
+- In canvas-pixel units: max displayable velocity = `0.80 × NAV_FRAME_H × navScale`.
 - Color gradient: green at low speed, yellow at moderate, red at high.
 - Data source: `NavigationState.speed`.
 
@@ -897,28 +837,28 @@ In `main.dart`:
 In `Engine::processAnalysisFrame()` commit path:
 
 ```
-EvaEngine: analysisFrame commit cropMs=%d convertMs=%d resizeMs=%d eccMs=%d compositeMs=%d totalMs=%d
+EvaEngine: analysisFrame commit navMs=%d downscaleMs=%d convertMs=%d eccMs=%d compositeMs=%d totalMs=%d
 ```
 
 Target budget (commit frame):
 
 | Step | Target |
 |------|--------|
-| ByteBuffer access (3 planes) | ~0ms |
-| CropY + phaseCorrelate + gating | ~8ms |
-| CropYuvToBgr (~640×480 from analysis) | ~10ms |
+| ByteBuffer access (single RGBA plane) | ~0ms |
+| Extract G + downscale 1600×1200→640×480 + phaseCorrelate + gating | ~10ms |
 | Rotation | ~2ms |
-| Resize ~640×480 → 800×600 | ~3ms |
+| Downscale RGBA 1600×1200 → 800×600 | ~5ms |
+| RGBA→BGR conversion (800×600) | ~1ms |
 | ECC | ~25ms |
 | compositeFrame (blend) | ~50ms |
-| **Nav-only frame** | **~8ms** |
-| **Commit frame total** | **~98ms** |
+| **Nav-only frame** | **~10ms** |
+| **Commit frame total** | **~93ms** |
 
 ### Step 8.2 — Rotation handling
 
-CameraX `setTargetRotation(ROTATION_0)` is set for all streams. The actual sensor orientation may require 0° or 180° rotation depending on device. Use `imageProxy.imageInfo.rotationDegrees` passed through JNI. Apply rotation in C++ before cropping.
+CameraX `setTargetRotation(ROTATION_0)` is set for all streams. The actual sensor orientation may require 0° or 180° rotation depending on device. Use `imageProxy.imageInfo.rotationDegrees` passed through JNI. Apply rotation in C++ before processing.
 
-**Why native rotation**: CameraX `setTargetRotation` affects JPEG EXIF orientation but not raw pixel layout for YUV. The actual Y/U/V plane data comes out in sensor orientation. Rotation must be applied in native code.
+**Why native rotation**: CameraX `setTargetRotation` affects JPEG EXIF orientation but not raw RGBA pixel layout. The actual pixel data comes out in sensor orientation. Rotation must be applied in native code.
 
 **MVP scope**: Support 0° and 180° rotation. 90°/270° (portrait mode) is documented but not required for MVP — app is landscape-only.
 
@@ -975,9 +915,10 @@ Update with all v3 changes.
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `CROP_RATIO` | 0.40 | 40% center crop from both streams |
 | `CANVAS_FRAME_W` | 800 | Canvas frame width |
 | `CANVAS_FRAME_H` | 600 | Canvas frame height |
+| `NAV_FRAME_W` | 640 | Nav frame width (post-downscale) |
+| `NAV_FRAME_H` | 480 | Nav frame height (post-downscale) |
 | `TILE_SIZE` | 512 | Canvas tile size |
 | `MAX_CACHED_TILES` | 100 | LRU limit (~200MB) |
 | `FEATHER_WIDTH` | 80 | Blend edge taper (canvas px) |
@@ -1037,17 +978,17 @@ Update with all v3 changes.
 ### A) Stream alignment & camera behavior
 
 - [x] Preview + ImageAnalysis alignment requirement explicitly stated (Core Design: Stream Alignment)
-- [x] Same effective crop framing across both active streams documented (40% proportional crop; ImageCapture debug-only)
+- [x] CameraX SCALAR_CROP delivers 1600×1200 from 4K sensor documented (Core Design: Stream Alignment)
 - [x] CameraX-first strategy for rotation documented (Phase 8.2: why native rotation)
 - [x] No contradictory transform ownership (rotation done in native code, documented why)
 
 ### B) Resolution/crop decisions
 
-- [x] Analysis stitch path: center crop → resize to 800×600 (Phase 1, Core Design)
-- [x] Analysis target resolution 1600×1200 (Core Design, Phase 1.6)
-- [x] 40% width/40% height proportional crop rule documented (Core Design)
+- [x] Analysis stitch path: 1600×1200 RGBA → downscale to 800×600 (Phase 1, Core Design)
+- [x] CameraX SCALAR_CROP crops sensor from 4K to 1600×1200 (Core Design, Phase 1.6)
+- [x] Nav frame: G channel extraction + downscale to 640×480 (Core Design)
 - [x] 4:3 framing consistency documented (Core Design)
-- [x] Fallback resolution includes rationale + FoV/crop consistency (Core Design: Analysis Resolution Strategy)
+- [x] Fallback resolution includes SCALAR_CROP fallback + rationale (Core Design: Analysis Resolution Strategy)
 - [x] Verification step confirms actual resolution matches or adapts (Phase 1 Verification)
 
 ### C) Coordinate model
@@ -1062,7 +1003,7 @@ Update with all v3 changes.
 
 - [x] ByteBuffer JNI zero-copy direction required (Core Design, Phase 1)
 - [x] ByteArray copies explicitly forbidden (Phase 1.4, 1.5)
-- [x] Crop-early/minimal-copy strategy described (Core Design, Phase 1.3)
+- [x] Single RGBA plane, no YUV conversion overhead (Core Design, Phase 1.3)
 - [x] Native/OpenCV acceleration focus in phase tasks (Phase 3.3, 3.4)
 - [x] Verification includes latency logging targets (Phase 8.1)
 - [x] CMakeLists.txt + Gradle wiring fully specified (Phase 1.1)

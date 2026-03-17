@@ -24,7 +24,7 @@ graph TB
     subgraph "Kotlin / Android"
         MA["MainActivity<br/>Processor registration"]
         EP["EvaCameraPlugin<br/>3 companion setters"]
-        CM["CameraManager<br/>CameraX 2 active use cases"]
+        CM["CameraManager<br/>CameraX 2 active use cases<br/>SCALAR_CROP 1600×1200"]
         NJ["NativeStitcher<br/>JNI declarations"]
     end
 
@@ -37,10 +37,10 @@ graph TB
 
     UI -->|"startScanning / stopScanning<br/>initEngine / resetEngine"| SC
     SC -->|MethodChannel| MA
-    MA -->|"startCamera(1600×1200)"| EP
+    MA -->|"startCamera(4K + SCALAR_CROP\n→1600×1200)"| EP
     EP --> CM
 
-    CM -->|"ImageAnalysis<br/>~30fps YUV ByteBuffers"| MA
+    CM -->|"ImageAnalysis<br/>~30fps RGBA8888<br/>1600×1200 (post-SCALAR_CROP)"| MA
     MA -->|"JNI (zero-copy)"| NJ
     NJ --> ENG
 
@@ -136,7 +136,7 @@ The analysis pipeline processes every ImageAnalysis frame (~30fps) for motion tr
 ```mermaid
 flowchart LR
     subgraph "CameraX"
-        IA["ImageAnalysis<br/>~1600×1200 YUV<br/>(actual varies)"]
+        IA["ImageAnalysis<br/>1600×1200 RGBA8888<br/>(post-SCALAR_CROP)"]
     end
 
     subgraph "Kotlin"
@@ -144,13 +144,13 @@ flowchart LR
     end
 
     subgraph "JNI Bridge"
-        GDA["GetDirectBufferAddress<br/>zero-copy Y pointer"]
+        GDA["GetDirectBufferAddress<br/>zero-copy RGBA pointer"]
     end
 
     subgraph "Engine.processAnalysisFrame"
         ROT_A["applyRotation()<br/>(if needed)"]
-        CROP_Y["cropY()<br/>center 40% of sensor<br/>→ ~640×480"]
-        LOG_A["Log: sensor/crop dims<br/>(first frame only)"]
+        EXTRACT_G["extractGreenDownscale()<br/>G channel of 1600×1200<br/>→ 640×480 grayscale"]
+        LOG_A["Log: frame dims<br/>(first frame only)"]
     end
 
     subgraph "Navigation.processFrame"
@@ -168,20 +168,20 @@ flowchart LR
         RET["Return void<br/>(commit done inline if gating passed)"]
     end
 
-    IA --> FP --> GDA --> ROT_A --> CROP_Y --> LOG_A
+    IA --> FP --> GDA --> ROT_A --> EXTRACT_G --> LOG_A
     LOG_A --> PC --> SCALE --> POSE --> VEL --> SHARP --> TRACK --> GATE --> QUAL --> RET
 ```
 
 **Key invariants**:
 
-- Y channel only (zero cost from YUV — first plane)
-- Crop ratio: 40% of sensor width × 40% of sensor height
+- G channel extracted from RGBA (high contrast for H&E stained slides)
+- Nav frame: 1600×1200 RGBA → extract G → downscale to 640×480 grayscale
 - Phase correlation displacement is in nav-frame pixels
-- Multiply by `navScale = CANVAS_FRAME_W / navCropW` → canvas pixel displacement
+- Multiply by `navScale = CANVAS_FRAME_W / NAV_FRAME_W = 800/640 = 1.25` → canvas pixel displacement
 - Pose accumulates in canvas coordinates (origin = first committed frame)
 - Quality formula: $quality = \sqrt[3]{lastConfidence \times sharpness \times overlapRatio}$, forced to 0 when overlap = 0
 - Gating logs: every decision logged with reason code + all metrics
-- **Stitch commit**: When gating passes, stitch commit (YUV→BGR crop → resize → ECC → composite) happens inline within `processAnalysisFrame`. Returns `void` to Kotlin.
+- **Stitch commit**: When gating passes, stitch commit (RGBA downscale → 800×600 BGR → ECC → composite) happens inline within `processAnalysisFrame`. Returns `void` to Kotlin.
 
 ---
 
@@ -192,15 +192,15 @@ The stitch commit fires when navigation gating passes. It happens **inline withi
 ```mermaid
 flowchart LR
     subgraph "Analysis Frame (same frame as nav)"
-        AF["ImageAnalysis YUV<br/>~1600×1200"]
-        BUFS_A["Y, U, V ByteBuffers<br/>passed from Kotlin"]
+        AF["ImageAnalysis RGBA8888<br/>1600×1200"]
+        BUFS_A["Single RGBA ByteBuffer<br/>passed from Kotlin"]
     end
 
     subgraph "Engine.processAnalysisFrame (commit path)"
-        GDB_A["GetDirectBufferAddress × 3<br/>zero-copy pointers"]
-        CROP_A["cropYuvToBgr()<br/>center 40% of analysis sensor<br/>→ ~640×480 BGR"]
+        GDB_A["GetDirectBufferAddress<br/>zero-copy RGBA pointer"]
+        RESIZE_A["cv::resize()<br/>1600×1200 → 800×600 RGBA"]
+        CONVERT_A["cv::cvtColor(RGBA2BGR)<br/>→ 800×600 BGR"]
         ROT_A["applyRotation()"]
-        RESIZE_A["cv::resize()<br/>→ 800×600 BGR"]
         READ_POSE_A["Read nav pose<br/>(under _stateMutex)"]
     end
 
@@ -213,7 +213,7 @@ flowchart LR
     end
 
     AF --> BUFS_A --> GDB_A
-    GDB_A --> CROP_A --> ROT_A --> RESIZE_A --> READ_POSE_A
+    GDB_A --> RESIZE_A --> CONVERT_A --> ROT_A --> READ_POSE_A
     READ_POSE_A --> ECC --> TILES --> WEIGHT --> BLEND --> UPDATE
 ```
 
@@ -221,14 +221,14 @@ flowchart LR
 
 | Step | Target |
 |------|--------|
-| CropY + phaseCorrelate + gating | ~8ms |
-| CropYuvToBgr (~640×480 from analysis) | ~10ms |
+| Extract G + downscale 1600×1200→640×480 + phaseCorrelate + gating | ~10ms |
 | Rotation | ~2ms |
-| Resize ~640×480 → 800×600 | ~3ms |
+| Downscale RGBA 1600×1200 → 800×600 | ~5ms |
+| RGBA→BGR conversion (800×600) | ~1ms |
 | ECC refinement (800×600) | ~25ms |
 | compositeFrame (blend + tile write) | ~50ms |
-| **Nav-only frame** | **~8ms** |
-| **Commit frame total** | **~98ms** |
+| **Nav-only frame** | **~10ms** |
+| **Commit frame total** | **~93ms** |
 
 **ECC details**:
 
@@ -392,35 +392,36 @@ Single coordinate system: **canvas pixels** (800×600 frame scale).
 
 **Scale conversions**:
 
-- Nav frame → canvas: multiply displacement by `navScale = 800 / navCropW`
-- Sensor → crop: offset = `(sensorDim − cropDim) / 2`
+- Nav frame → canvas: multiply displacement by `navScale = 800 / 640 = 1.25`
+- Analysis (1600×1200) → nav (640×480): downscale factor 2.5×
+- Analysis (1600×1200) → canvas (800×600): downscale factor 2.0×
 
 ---
 
-## 9. Crop Pipeline Detail
+## 9. Frame Processing Pipeline Detail
 
-Both camera streams use the same proportional center crop to ensure identical field of view.
+ImageAnalysis receives 1600×1200 RGBA8888 frames (center-cropped from 4K sensor by CameraX SCALAR_CROP). Two processing paths branch from this single frame.
 
 ```mermaid
 flowchart TB
     subgraph "Analysis Path (nav + stitch)"
-        AS["Sensor ~1600×1200"]
-        AC["Center Crop 40%<br/>~640×480"]
+        AS["1600×1200 RGBA8888<br/>(from CameraX SCALAR_CROP)"]
         AROT["Rotate (if needed)"]
-        AF["Nav Frame (Y-only)<br/>(direct use, no resize)"]
-        ASTITCH["YUV→BGR (on commit)<br/>same crop region"]
-        ARESZ["Resize → 800×600<br/>Canvas Frame"]
+        AG["Extract G channel<br/>+ downscale → 640×480"]
+        AF["Nav Frame (grayscale)<br/>(G channel, high contrast for H&E)"]
+        ARESZ["Downscale RGBA → 800×600<br/>+ RGBA2BGR"]
+        ACAN["Canvas Frame (BGR)<br/>800×600"]
     end
 
-    AS --> AC --> AROT --> AF
-    AC --> ASTITCH --> ARESZ
+    AS --> AROT --> AG --> AF
+    AROT --> ARESZ --> ACAN
 ```
 
-**Single-source crop**: The analysis frame is cropped once (40% width × 40% height) to produce the nav frame (~640×480 Y-only). On a stitch commit, the same crop region is converted YUV→BGR for the canvas frame.
+**Single-source processing**: The 1600×1200 RGBA frame is processed two ways. Navigation extracts the G channel and downscales to 640×480 grayscale. On a stitch commit, the same frame is downscaled to 800×600 and converted RGBA→BGR for canvas tiles.
 
-**Nav frame size**: ~640×480 from 1600×1200 × 0.40. Phase correlation runs at this resolution.
+**Nav frame size**: 640×480 (fixed constant `NAV_FRAME_W × NAV_FRAME_H`). Phase correlation runs at this resolution.
 
-**Canvas frame**: Always resized to exactly 800×600 from the analysis crop (slight upscale from ~640×480).
+**Canvas frame**: Always 800×600 (downscaled from 1600×1200 RGBA).
 
 ---
 
@@ -453,7 +454,7 @@ flowchart LR
 - Preview rendering uses `_canvasMutex` **shared** lock (concurrent reads OK, doesn’t block nav-only frames).
 - `_stateMutex` is lightweight contention point: analysis writes at 30fps, Dart reads at 20fps.
 - **No deadlock potential**: Lock ordering is always `_stateMutex` → `_canvasMutex` (never reversed). `_navMutex` is only held by the analysis thread.
-- **ImageProxy must be closed in same callback** — ByteBuffer pointers (Y/U/V) invalid after close. All processing (nav + optional stitch commit) must complete before returning from the JNI entry point.
+- **ImageProxy must be closed in same callback** — ByteBuffer pointer (RGBA) invalid after close. All processing (nav + optional stitch commit) must complete before returning from the JNI entry point.
 
 ---
 
@@ -489,7 +490,7 @@ flowchart LR
 
 | Method | Parameters | Returns | Thread |
 |--------|------------|---------|--------|
-| `processAnalysisFrame` | `jobject yBuf, jobject uBuf, jobject vBuf, int w, int h, int yStride, int uvStride, int uvPixelStride, int rotation, long timestampNs` | `void` | CameraX executor |
+| `processAnalysisFrame` | `jobject rgbaBuf, int w, int h, int stride, int rotation, long timestampNs` | `void` | CameraX executor |
 | `getNavigationState` | none | `jfloatArray[19]` | Dart main thread |
 | `initEngine` | `int analysisW, int analysisH` | `void` | Dart main thread |
 | `getCanvasPreview` | `int maxDim` | `jbyteArray` (JPEG) | Dart main thread |
@@ -519,13 +520,13 @@ Each module is one `.h/.cpp` pair. No deep abstraction hierarchies.
 ## 14. Data Flow Summary
 
 ```
-Analysis frame (~1600×1200 YUV, 30fps)
+Analysis frame (1600×1200 RGBA8888, post-SCALAR_CROP from 4K sensor, 30fps)
   │
-  ├─→ [C++] Rotate → Center crop 40% → nav frame (~640×480 Y-only)
+  ├─→ [C++] Rotate → Extract G channel → downscale → nav frame (640×480 grayscale)
   │     │
   │     ├─→ phaseCorrelate vs previous → (dx, dy, confidence)
   │     │     │
-  │     │     ├─→ displacement × navScale → canvas px
+  │     │     ├─→ displacement × navScale (1.25) → canvas px
   │     │     ├─→ pose += displacement
   │     │     ├─→ velocity EMA + deadband
   │     │     ├─→ sharpness (Laplacian variance)
@@ -537,8 +538,9 @@ Analysis frame (~1600×1200 YUV, 30fps)
   │     ├─→ Pack NavigationState → float[19]
   │     │
   │     └─→ If TRIGGER: [C++] inline stitch commit (same analysis frame)
-  │               ├─→ cropYuvToBgr → center 40% → ~640×480 BGR
-  │               ├─→ Rotate → resize → 800×600 canvas frame
+  │               ├─→ cv::resize RGBA 1600×1200 → 800×600
+  │               ├─→ cv::cvtColor RGBA2BGR → 800×600 BGR canvas frame
+  │               ├─→ Rotate (if needed)
   │               ├─→ Read predicted pose from navigation (under _stateMutex)
   │               ├─→ ECC refine against canvas patch (try-catch, skip if sparse)
   │               ├─→ Linear feather blend onto canvas tiles (exclusive _canvasMutex)
