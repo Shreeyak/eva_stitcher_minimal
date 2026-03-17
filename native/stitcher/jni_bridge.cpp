@@ -17,11 +17,14 @@ extern "C" {
 
 JNIEXPORT void JNICALL
 Java_com_example_eva_1minimal_1demo_NativeStitcher_initEngine(
-    JNIEnv* /*env*/, jclass /*clazz*/,
-    jint analysisW, jint analysisH)
+    JNIEnv* env, jclass /*clazz*/,
+    jint analysisW, jint analysisH, jstring cacheDir)
 {
+    const char* cacheDirStr = env->GetStringUTFChars(cacheDir, nullptr);
     gEngine = std::make_unique<Engine>();
-    gEngine->init(static_cast<int>(analysisW), static_cast<int>(analysisH));
+    gEngine->init(static_cast<int>(analysisW), static_cast<int>(analysisH),
+                  cacheDirStr ? std::string(cacheDirStr) : std::string());
+    if (cacheDirStr) env->ReleaseStringUTFChars(cacheDir, cacheDirStr);
 }
 
 // ── processAnalysisFrame ──────────────────────────────────────────────────

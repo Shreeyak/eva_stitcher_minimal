@@ -75,7 +75,10 @@ class MainActivity : FlutterActivity() {
                 "initEngine" -> {
                     val analysisW = call.argument<Int>("analysisW") ?: 0
                     val analysisH = call.argument<Int>("analysisH") ?: 0
-                    NativeStitcher.initEngine(analysisW, analysisH)
+                    val cacheDir = "${filesDir.absolutePath}/tile_cache".also {
+                        java.io.File(it).mkdirs()
+                    }
+                    NativeStitcher.initEngine(analysisW, analysisH, cacheDir)
                     result.success(null)
                 }
                 "getNavigationState" -> {

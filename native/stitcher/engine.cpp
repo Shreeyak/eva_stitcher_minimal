@@ -21,7 +21,10 @@ static inline int64_t nowMs() {
 
 // ── Engine public API ──────────────────────────────────────────────────────
 
-void Engine::init(int analysisW, int analysisH) {
+Engine::Engine()  = default;
+Engine::~Engine() = default;
+
+void Engine::init(int analysisW, int analysisH, const std::string& cacheDir) {
     _analysisW = analysisW;
     _analysisH = analysisH;
 
@@ -29,15 +32,16 @@ void Engine::init(int analysisW, int analysisH) {
     _canvas = std::make_unique<Canvas>();
 
     _nav->init(CANVAS_FRAME_W, CANVAS_FRAME_H, NAV_FRAME_W, NAV_FRAME_H);
-    _canvas->init(CANVAS_FRAME_W, CANVAS_FRAME_H);
+    _canvas->init(CANVAS_FRAME_W, CANVAS_FRAME_H, cacheDir);
 
     _scanningActive    = false;
     _captureInProgress = false;
     _initialized       = true;
 
-    LOGI("initEngine: analysis=%dx%d navFrame=%dx%d navScale=%.3f",
+    LOGI("initEngine: analysis=%dx%d navFrame=%dx%d navScale=%.3f cacheDir=%s",
          analysisW, analysisH, NAV_FRAME_W, NAV_FRAME_H,
-         static_cast<float>(CANVAS_FRAME_W) / NAV_FRAME_W);
+         static_cast<float>(CANVAS_FRAME_W) / NAV_FRAME_W,
+         cacheDir.c_str());
 }
 
 void Engine::processAnalysisFrame(

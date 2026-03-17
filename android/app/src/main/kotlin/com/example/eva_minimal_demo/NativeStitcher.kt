@@ -25,10 +25,12 @@ object NativeStitcher {
 
     /**
      * Initialize the stitching engine with the actual analysis stream resolution.
+     * [cacheDir] is a writable directory for evicted canvas tile PNGs; provided by
+     * the host app so the engine stays context-free.
      * Must be called once after [startCamera] returns its resolved dimensions.
      */
     @JvmStatic
-    external fun initEngine(analysisW: Int, analysisH: Int)
+    external fun initEngine(analysisW: Int, analysisH: Int, cacheDir: String)
 
     /**
      * Process one RGBA8888 analysis frame.

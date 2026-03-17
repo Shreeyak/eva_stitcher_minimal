@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-03-17 (update 3)
+
+- **Phase 3 (Tiled Canvas + Compositing)**: Replaced 4096×4096 monolithic stub with an `unordered_map`-backed LRU tile cache (`CV_8UC3` BGR pixels + `CV_8UC1` mask per tile — no alpha channel). Feather weight map pre-computed once at init via OpenCV mat ops. `compositeFrame` splits each tile subregion into interior (w=1, direct overwrite) and feather-band strips (w<1, blend only written pixels; direct copy for empty); float arithmetic is confined to the narrow feather band only. LRU eviction flushes dirty tiles to PNG on disk; `getTile` reloads from disk on cache miss. `renderPreview` uses a shared lock; `compositeFrame`/`reset` use exclusive lock; `getOverlapRatio` is lock-free (analysis thread only). `initEngine` now accepts a `cacheDir` string propagated from `MainActivity.kt` (`filesDir/tile_cache`) through JNI → `Engine::init` → `Canvas::init`.
+
 ## 2026-03-17 (update 2)
 
 - **RGBA8888 stitcher update**: Switched ImageAnalysis format from `YUV_420_888` to `RGBA_8888` in `CameraManager.kt`; replaced YUV 3-plane crop helpers (`cropY`/`cropYuvToBgr`) with RGBA helpers (`extractGreenDownscale`: G-channel → 640×480 nav, `downscaleRgba`: RGBA→BGR 800×600 canvas frame); replaced `CROP_RATIO` constant with fixed `NAV_FRAME_W=640`/`NAV_FRAME_H=480`.

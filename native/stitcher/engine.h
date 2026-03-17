@@ -3,6 +3,7 @@
 #include <jni.h>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <opencv2/core.hpp>
 
 #include "types.h"
@@ -12,14 +13,15 @@ class Canvas;
 
 class Engine {
 public:
-    Engine() = default;
-    ~Engine() = default;
+    Engine();
+    ~Engine();
 
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
     // Called once after camera starts with the actual analysis resolution.
-    void init(int analysisW, int analysisH);
+    // cacheDir: writable directory used for evicted canvas tile PNGs.
+    void init(int analysisW, int analysisH, const std::string& cacheDir);
 
     // Called every analysis frame (~30fps) on the CameraX executor thread.
     // framePtr is valid only during this call; do not hold a reference.
