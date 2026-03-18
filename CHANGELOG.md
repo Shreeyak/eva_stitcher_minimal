@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-18 (update 19)
+
+### Lock app to landscape-right orientation
+
+- Added `android:screenOrientation="sensorLandscape"` to `AndroidManifest.xml`.
+- Prevents orientation-change config events from tearing down and recreating `CameraManager`, eliminating a whole class of camera-restart bugs.
+
 ## 2026-03-18 (update 18)
 
 ### Fix crash: heap ByteBuffer → allocateDirect for camera frame copies
