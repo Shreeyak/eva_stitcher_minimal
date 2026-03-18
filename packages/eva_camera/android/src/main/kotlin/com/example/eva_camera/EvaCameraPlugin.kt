@@ -81,6 +81,7 @@ class EvaCameraPlugin :
         eventsChannel?.setStreamHandler(null)
         eventsChannel = null
         cameraManager?.stopCamera()
+        cameraManager?.destroy()
         cameraManager = null
     }
 

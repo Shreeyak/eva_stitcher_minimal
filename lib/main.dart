@@ -781,8 +781,8 @@ class _CameraScreenState extends State<CameraScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (_cameraStarted)
-                            InteractiveBottomBar(
+                          InteractiveBottomBar(
+                              cameraReady: _cameraStarted,
                               isScanning: _isScanning,
                               showCanvas: _showCanvas,
                               isSettingsOpen: _settingsDrawerOpen,

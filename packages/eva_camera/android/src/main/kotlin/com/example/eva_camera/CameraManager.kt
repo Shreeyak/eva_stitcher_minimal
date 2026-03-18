@@ -469,6 +469,13 @@ class CameraManager(
             executor.shutdownNow()
         }
         cameraExecutor = null
+    }
+
+    /**
+     * Release all long-lived resources. Call this when the plugin is fully torn down
+     * (not just between camera sessions). Safe to call multiple times.
+     */
+    fun destroy() {
         analysisExecutor.shutdown()
     }
 

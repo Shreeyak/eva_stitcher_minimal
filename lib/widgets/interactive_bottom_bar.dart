@@ -8,6 +8,7 @@ import 'camera_settings_bar.dart';
 /// The bottom interactive area that hosts both the Main Action Bar
 /// and the Camera Settings Bar, animating between them.
 class InteractiveBottomBar extends StatelessWidget {
+  final bool cameraReady;
   final bool isScanning;
   final bool showCanvas;
   final bool isSettingsOpen;
@@ -30,6 +31,7 @@ class InteractiveBottomBar extends StatelessWidget {
 
   const InteractiveBottomBar({
     super.key,
+    required this.cameraReady,
     required this.isScanning,
     required this.showCanvas,
     required this.isSettingsOpen,
@@ -65,6 +67,7 @@ class InteractiveBottomBar extends StatelessWidget {
                 child: FractionalTranslation(
                   translation: Offset(0, t),
                   child: _MainActionBar(
+                    cameraReady: cameraReady,
                     isScanning: isScanning,
                     showCanvas: showCanvas,
                     canExport: canExport,
@@ -105,6 +108,7 @@ class InteractiveBottomBar extends StatelessWidget {
 }
 
 class _MainActionBar extends StatelessWidget {
+  final bool cameraReady;
   final bool isScanning;
   final bool showCanvas;
   final bool canExport;
@@ -117,6 +121,7 @@ class _MainActionBar extends StatelessWidget {
   final VoidCallback onToggleDebugOverlay;
 
   const _MainActionBar({
+    required this.cameraReady,
     required this.isScanning,
     required this.showCanvas,
     required this.canExport,
@@ -185,18 +190,26 @@ class _MainActionBar extends StatelessWidget {
             height: 38,
             child: FloatingActionButton.extended(
               elevation: 0,
-              onPressed: onToggleScan,
-              backgroundColor: isScanning ? cs.tertiary : cs.primaryContainer,
-              foregroundColor: isScanning
-                  ? cs.onTertiary
-                  : cs.onPrimaryContainer,
+              onPressed: cameraReady ? onToggleScan : null,
+              backgroundColor: !cameraReady
+                  ? cs.surfaceContainerHighest
+                  : isScanning
+                      ? cs.tertiary
+                      : cs.primaryContainer,
+              foregroundColor: !cameraReady
+                  ? cs.onSurfaceVariant
+                  : isScanning
+                      ? cs.onTertiary
+                      : cs.onPrimaryContainer,
               icon: Icon(
                 isScanning
                     ? Icons.stop_circle_outlined
                     : Icons.play_circle_outline,
               ),
               label: Text(
-                isScanning ? 'STOP' : 'START',
+                cameraReady
+                    ? (isScanning ? 'STOP' : 'START')
+                    : 'NO CAMERA',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1,

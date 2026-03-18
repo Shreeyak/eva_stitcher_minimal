@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-17 (update 17)
+
+### Fix CAMERA_START_FAILED + missing UI (regression from update 16)
+
+- **CameraManager**: Removed `analysisExecutor.shutdown()` from `stopCamera()`. Added `destroy()` (shuts down both executors) — only called at true plugin teardown.
+- **EvaCameraPlugin**: Calls `cameraManager?.destroy()` in `onDetachedFromEngine` for clean executor shutdown.
+- **InteractiveBottomBar**: Added `cameraReady` param; START/STOP FAB disabled (shows "NO CAMERA") when camera hasn't started. Bottom bar now always rendered — never gated on `_cameraStarted`.
+
 ## 2026-03-17 (update 16)
 
 ### ImageCapture stitch path
