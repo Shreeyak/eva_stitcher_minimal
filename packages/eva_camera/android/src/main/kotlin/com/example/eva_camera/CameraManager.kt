@@ -36,6 +36,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.plugin.common.EventChannel
+import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -74,6 +75,10 @@ class CameraManager(
     private var imageAnalysis: ImageAnalysis? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraExecutor: ExecutorService? = null
+    // Single-thread executor for C++ analysis — separate from cameraExecutor so the
+    // camera thread is free (proxy already closed) while navigation runs.
+    private val analysisExecutor: ExecutorService =
+        Executors.newSingleThreadExecutor { Thread(it, "analysis-nav") }
 
     // ── Camera controls state ───────────────────────────────────────────
     private var afEnabled: Boolean = false
@@ -464,23 +469,50 @@ class CameraManager(
             executor.shutdownNow()
         }
         cameraExecutor = null
+        analysisExecutor.shutdown()
     }
 
     // ── Frame processing (native-side only) ─────────────────────────────
 
     private fun processFrame(imageProxy: ImageProxy) {
-        try {
-            frameCount++
+        frameCount++
+        val processor = frameProcessor
+        if (processor == null) {
+            imageProxy.close()
+            return
+        }
 
-            val processor = frameProcessor ?: return
-            val shouldCapture = processor.processFrame(imageProxy = imageProxy, captureResult = latestCaptureResult)
+        // Copy pixel data and close the proxy immediately so the camera buffer
+        // is returned to the ISP pool before the expensive C++ analysis starts.
+        val plane    = imageProxy.planes[0]
+        val src      = plane.buffer
+        val t0copy   = System.currentTimeMillis()
+        val bytes    = ByteArray(src.remaining()).also { src.get(it) }
+        val copyMs   = System.currentTimeMillis() - t0copy
+        val w        = imageProxy.width
+        val h        = imageProxy.height
+        val stride   = plane.rowStride
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val ts       = imageProxy.imageInfo.timestamp
+        val result   = latestCaptureResult
+        imageProxy.close()   // released before C++ analysis begins
+        Log.d(TAG, "Analysis copy: ${w}x${h} size=${bytes.size / 1024}KB copyMs=$copyMs")
+
+        analysisExecutor.execute {
+            val shouldCapture = processor.processFrame(
+                buf         = ByteBuffer.wrap(bytes),
+                w           = w,
+                h           = h,
+                stride      = stride,
+                rotation    = rotation,
+                timestampNs = ts,
+                captureResult = result,
+            )
             if (shouldCapture > 0.5f) {
                 captureStitchFrame { error ->
                     if (error != null) Log.e(TAG, "Auto-stitch capture failed", error)
                 }
             }
-        } finally {
-            imageProxy.close()
         }
     }
 

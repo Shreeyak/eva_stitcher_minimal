@@ -189,6 +189,15 @@ flowchart LR
 
 The stitch commit fires when navigation gating passes. It happens **inline within `processAnalysisFrame`** using the same analysis frame — no separate ImageCapture use case, no Kotlin-side callback.
 
+### Signal Path
+
+```
+C++ gate fires → returns bool → JNI jboolean → NativeStitcher.Boolean
+→ FrameProcessor returns 1.0f → CameraManager triggers captureStitchFrame()
+→ StitchFrameProcessor.onStitchFrame() → NativeStitcher.processStitchFrame()
+→ Engine::processStitchFrame() — downscale 4K RGBA → composite at _pendingCapturePose
+```
+
 ```mermaid
 flowchart LR
     subgraph "Analysis Frame (same frame as nav)"

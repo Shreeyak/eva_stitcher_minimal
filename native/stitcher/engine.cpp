@@ -95,15 +95,16 @@ void Engine::processStitchFrame(
 
     const int64_t t0 = nowMs();
 
-    // Downscale 4K RGBA → 800×600 BGR, rotate 180° — same path as analysis stitch.
+    // Downscale capture frame RGBA (src dimensions logged below) → 800×600 BGR, rotate 180°.
     cv::Mat canvasFrame = downscaleFrame(framePtr, w, h, stride);
+    const int64_t downscaleMs = nowMs() - t0;
 
     _canvas->compositeFrame(canvasFrame, _pendingCapturePose);
     _nav->onFrameCommitted();
+    const int64_t compositeMs = nowMs() - t0 - downscaleMs;
 
-    const int64_t compositeMs = nowMs() - t0;
-    LOGI("processStitchFrame commit: src=%dx%d compositeMs=%lld",
-         w, h, (long long)compositeMs);
+    LOGI("processStitchFrame: src=%dx%d downscaleMs=%lld compositeMs=%lld totalMs=%lld",
+         w, h, (long long)downscaleMs, (long long)compositeMs, (long long)(downscaleMs + compositeMs));
 
     NavigationState snap = _nav->getState();
     snap.compositeTimeMs = static_cast<float>(compositeMs);

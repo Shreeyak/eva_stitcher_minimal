@@ -16,12 +16,20 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.nio.ByteBuffer
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
         private const val STITCH_CHANNEL = "com.example.eva/stitch"
+    }
+
+    // Single-thread executor for the heavy C++ downscale+composite work.
+    // Isolated from the camera executor so ImageProxy can be closed before processing starts.
+    private val stitchExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "stitch-composite")
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -34,16 +42,21 @@ class MainActivity : FlutterActivity() {
         EvaCameraPlugin.setFrameProcessor(
             object : FrameProcessor {
                 override fun processFrame(
-                    imageProxy: ImageProxy,
+                    buf: ByteBuffer,
+                    w: Int,
+                    h: Int,
+                    stride: Int,
+                    rotation: Int,
+                    timestampNs: Long,
                     captureResult: TotalCaptureResult?,
                 ): Float {
                     val shouldCapture = NativeStitcher.processAnalysisFrame(
-                        imageProxy.planes[0].buffer,
-                        imageProxy.width,
-                        imageProxy.height,
-                        imageProxy.planes[0].rowStride,
-                        imageProxy.imageInfo.rotationDegrees,
-                        imageProxy.imageInfo.timestamp,
+                        frameBuf    = buf,
+                        w           = w,
+                        h           = h,
+                        stride      = stride,
+                        rotation    = rotation,
+                        timestampNs = timestampNs,
                     )
                     return if (shouldCapture) 1.0f else 0.0f
                 }
@@ -68,14 +81,32 @@ class MainActivity : FlutterActivity() {
                     captureResult: TotalCaptureResult?,
                 ) {
                     val plane = imageProxy.planes[0]  // RGBA_8888: single plane
-                    NativeStitcher.processStitchFrame(
-                        frameBuf    = plane.buffer,
-                        w           = imageProxy.width,
-                        h           = imageProxy.height,
-                        stride      = plane.rowStride,
-                        rotation    = imageProxy.imageInfo.rotationDegrees,
-                        timestampNs = imageProxy.imageInfo.timestamp,
-                    )
+
+                    // Copy pixel data before returning so captureStill's finally block
+                    // can close the ImageProxy immediately — releasing the camera buffer
+                    // without waiting for the expensive C++ downscale+composite.
+                    val buf = plane.buffer
+                    val t0copy = System.currentTimeMillis()
+                    val bytes = ByteArray(buf.remaining()).also { buf.get(it) }
+                    val copyMs = System.currentTimeMillis() - t0copy
+                    val w       = imageProxy.width
+                    val h       = imageProxy.height
+                    val stride  = plane.rowStride
+                    val rotation = imageProxy.imageInfo.rotationDegrees
+                    val tsNs    = imageProxy.imageInfo.timestamp
+                    Log.i(TAG, "Stitch copy: ${w}x${h} size=${bytes.size / 1024}KB copyMs=$copyMs")
+
+                    // Return here — imageProxy.close() fires in captureStill's finally block.
+                    stitchExecutor.execute {
+                        NativeStitcher.processStitchFrame(
+                            frameBuf    = ByteBuffer.wrap(bytes),
+                            w           = w,
+                            h           = h,
+                            stride      = stride,
+                            rotation    = rotation,
+                            timestampNs = tsNs,
+                        )
+                    }
                 }
             },
         )
@@ -167,5 +198,10 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        stitchExecutor.shutdown()
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 }
