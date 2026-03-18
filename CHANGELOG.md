@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-18 (update 18)
+
+### CameraX Resolution Negotiation Logging
+
+- **CameraManager**: Added comprehensive logging for CameraX resolution negotiation at camera bind time. Logs preferred sizes (pre-bind), all supported output sizes from Camera2 StreamConfigurationMap, and actual selected sizes (post-bind).
+- **Fallback detection**: Detects when CameraX negotiates down from preferred resolutions due to HAL constraints; warns with `⚠️ CAPTURE/ANALYSIS FALLBACK DETECTED` in logcat.
+- **Upscaling detection**: Warns if the HAL provides a lower resolution than preferred, indicating potential upscaling risk.
+- **Resolution report**: Writes persistent report to `<app-external>/resolution_negotiation_<timestamp>.txt` with full negotiation details.
+- **API enhancement**: `gatherResolutionInfo()` now includes `captureFallbackDetected` and `analysisFallbackDetected` boolean flags for Dart UI warnings.
+
 ## 2026-03-17 (update 17)
 
 ### Fix CAMERA_START_FAILED + missing UI (regression from update 16)

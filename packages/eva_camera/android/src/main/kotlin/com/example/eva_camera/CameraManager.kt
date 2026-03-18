@@ -10,6 +10,8 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.RggbChannelVector
+import android.hardware.camera2.params.StreamConfigurationMap
+import android.graphics.ImageFormat
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -108,6 +110,12 @@ class CameraManager(
 
     @Volatile private var availableAeTargetFpsRanges: Array<Range<Int>> = emptyArray()
     private var aeTargetFpsRange: Range<Int>? = null
+
+    // Resolution negotiation tracking
+    @Volatile private var captureFallbackDetected: Boolean = false
+    @Volatile private var analysisFallbackDetected: Boolean = false
+    @Volatile private var supportedCaptureSizes: List<String> = emptyList()
+    @Volatile private var supportedAnalysisSizes: List<String> = emptyList()
 
     // Focus distance captured from live AF results
     @Volatile private var capturedFocusDistance: Float? = null
@@ -245,6 +253,10 @@ class CameraManager(
         callback: (Map<String, Any>?, Exception?) -> Unit,
     ) {
         try {
+            // Log preferred sizes before bind attempt
+            Log.i(TAG, "RESOLUTION_NEGOTIATION: Preferred capture size = ${preferredCaptureSize.width}×${preferredCaptureSize.height}")
+            Log.i(TAG, "RESOLUTION_NEGOTIATION: Preferred analysis size = ${preferredAnalysisSize.width}×${preferredAnalysisSize.height}")
+
             // ── Resolution selectors ──
             val captureResolution =
                 ResolutionSelector
@@ -414,6 +426,9 @@ class CameraManager(
                 sensorCropRect = null
                 Log.w(TAG, "SENSOR_INFO_ACTIVE_ARRAY_SIZE unavailable — no center crop applied")
             }
+
+            // Query and log resolution negotiation details
+            logResolutionNegotiation(cam)
 
             // Reset frame counter
             frameCount = 0
@@ -878,6 +893,9 @@ class CameraManager(
             result["analysisWidth"] = it.width
             result["analysisHeight"] = it.height
         }
+        // Add fallback detection flags for UI warnings
+        result["captureFallbackDetected"] = captureFallbackDetected
+        result["analysisFallbackDetected"] = analysisFallbackDetected
         return result
     }
 
@@ -1090,5 +1108,195 @@ class CameraManager(
         val event = mutableMapOf<String, Any>("type" to type, "tag" to tag, "message" to message)
         if (data.isNotEmpty()) event["data"] = data
         mainHandler.post { eventSink?.success(event) }
+    }
+
+    /** Query Camera2 for supported output sizes for different formats. */
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun querySupportedSizes(cam: Camera, format: Int): List<Size> {
+        return try {
+            val cam2Info = Camera2CameraInfo.from(cam.cameraInfo)
+            val streamMap: StreamConfigurationMap? = cam2Info.getCameraCharacteristic(
+                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+            )
+            streamMap?.getOutputSizes(format)?.toList() ?: emptyList()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to query supported sizes for format $format: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Log resolution negotiation details: preferred, supported, and selected sizes. */
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun logResolutionNegotiation(cam: Camera) {
+        try {
+            // Get selected resolutions (actual negotiated sizes)
+            val selectedCaptureSize = imageCapture?.resolutionInfo?.resolution
+            val selectedAnalysisSize = imageAnalysis?.resolutionInfo?.resolution
+
+            // Query supported sizes for capture (JPEG format typically available)
+            val supportedCaptureSizesJpeg = querySupportedSizes(cam, ImageFormat.JPEG)
+            val supportedCaptureSizesRgba = querySupportedSizes(cam, ImageFormat.PRIVATE)
+
+            // Query supported sizes for analysis (YUV_420_888, RGBA_8888)
+            val supportedAnalysisSizesYuv = querySupportedSizes(cam, ImageFormat.YUV_420_888)
+            val supportedAnalysisSizesRgba = querySupportedSizes(cam, ImageFormat.PRIVATE)
+
+            // Format supported sizes as readable strings
+            val captureSizesStr = formatSizesForLog(
+                (supportedCaptureSizesJpeg + supportedCaptureSizesRgba).distinct().sortedByDescending { it.width * it.height }
+            )
+            val analysisSizesStr = formatSizesForLog(
+                (supportedAnalysisSizesYuv + supportedAnalysisSizesRgba).distinct().sortedByDescending { it.width * it.height }
+            )
+
+            supportedCaptureSizes = captureSizesStr.split(", ")
+            supportedAnalysisSizes = analysisSizesStr.split(", ")
+
+            // Log supported sizes
+            Log.i(TAG, "RESOLUTION_NEGOTIATION: Supported capture formats: $captureSizesStr")
+            Log.i(TAG, "RESOLUTION_NEGOTIATION: Supported analysis formats: $analysisSizesStr")
+
+            // Detect fallback for capture
+            val captureFallback = selectedCaptureSize?.let { size ->
+                if (size.width != preferredCaptureSize.width || size.height != preferredCaptureSize.height) {
+                    true
+                } else {
+                    false
+                }
+            } ?: false
+            captureFallbackDetected = captureFallback
+
+            // Detect fallback for analysis
+            val analysisFallback = selectedAnalysisSize?.let { size ->
+                if (size.width != preferredAnalysisSize.width || size.height != preferredAnalysisSize.height) {
+                    true
+                } else {
+                    false
+                }
+            } ?: false
+            analysisFallbackDetected = analysisFallback
+
+            // Log selected resolutions
+            selectedCaptureSize?.let { size ->
+                if (captureFallback) {
+                    Log.w(TAG, "RESOLUTION_NEGOTIATION: ⚠️ CAPTURE FALLBACK DETECTED: preferred ${preferredCaptureSize.width}×${preferredCaptureSize.height}, selected ${size.width}×${size.height}")
+                } else {
+                    Log.i(TAG, "RESOLUTION_NEGOTIATION: Selected capture size = ${size.width}×${size.height} (matches preferred)")
+                }
+            } ?: Log.w(TAG, "RESOLUTION_NEGOTIATION: Selected capture size = <unknown>")
+
+            selectedAnalysisSize?.let { size ->
+                if (analysisFallback) {
+                    Log.w(TAG, "RESOLUTION_NEGOTIATION: ⚠️ ANALYSIS FALLBACK DETECTED: preferred ${preferredAnalysisSize.width}×${preferredAnalysisSize.height}, selected ${size.width}×${size.height}")
+                } else {
+                    Log.i(TAG, "RESOLUTION_NEGOTIATION: Selected analysis size = ${size.width}×${size.height} (matches preferred)")
+                }
+            } ?: Log.w(TAG, "RESOLUTION_NEGOTIATION: Selected analysis size = <unknown>")
+
+            // Warn about upscaling (selected < preferred)
+            selectedCaptureSize?.let { size ->
+                if (size.width * size.height < preferredCaptureSize.width * preferredCaptureSize.height) {
+                    Log.w(TAG, "RESOLUTION_NEGOTIATION: ⚠️ CAPTURE UPSCALING RISK: HAL provides ${size.width}×${size.height} (${size.width * size.height} px), may upscale to preferred ${preferredCaptureSize.width}×${preferredCaptureSize.height} (${preferredCaptureSize.width * preferredCaptureSize.height} px)")
+                }
+            }
+
+            selectedAnalysisSize?.let { size ->
+                if (size.width * size.height < preferredAnalysisSize.width * preferredAnalysisSize.height) {
+                    Log.w(TAG, "RESOLUTION_NEGOTIATION: ⚠️ ANALYSIS UPSCALING RISK: HAL provides ${size.width}×${size.height} (${size.width * size.height} px), may upscale to preferred ${preferredAnalysisSize.width}×${preferredAnalysisSize.height} (${preferredAnalysisSize.width * preferredAnalysisSize.height} px)")
+                }
+            }
+
+            // Write to file for persistent logging
+            dumpResolutionNegotiationReport(
+                preferredCapture = preferredCaptureSize,
+                selectedCapture = selectedCaptureSize,
+                supportedCapture = supportedCaptureSizesJpeg + supportedCaptureSizesRgba,
+                captureFallback = captureFallback,
+                preferredAnalysis = preferredAnalysisSize,
+                selectedAnalysis = selectedAnalysisSize,
+                supportedAnalysis = supportedAnalysisSizesYuv + supportedAnalysisSizesRgba,
+                analysisFallback = analysisFallback,
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to log resolution negotiation: ${e.message}", e)
+        }
+    }
+
+    /** Format a list of sizes for human-readable logging. */
+    private fun formatSizesForLog(sizes: List<Size>): String {
+        return sizes.distinct().sortedByDescending { it.width * it.height }
+            .take(10)  // Limit to top 10 to avoid spam
+            .joinToString(", ") { "${it.width}×${it.height}" }
+    }
+
+    /** Write resolution negotiation report to app external files directory. */
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun dumpResolutionNegotiationReport(
+        preferredCapture: Size,
+        selectedCapture: Size?,
+        supportedCapture: List<Size>,
+        captureFallback: Boolean,
+        preferredAnalysis: Size,
+        selectedAnalysis: Size?,
+        supportedAnalysis: List<Size>,
+        analysisFallback: Boolean,
+    ) {
+        try {
+            val timestamp = System.currentTimeMillis()
+            val filename = "resolution_negotiation_$timestamp.txt"
+            val file = java.io.File(context.getExternalFilesDir(null), filename)
+
+            val report = buildString {
+                appendLine("============================================================")
+                appendLine("CameraX Resolution Negotiation Report")
+                appendLine("============================================================")
+                appendLine("Timestamp: $timestamp")
+                appendLine()
+
+                appendLine("CAPTURE USE CASE:")
+                appendLine("  Preferred: ${preferredCapture.width}×${preferredCapture.height}")
+                appendLine("  Selected:  ${selectedCapture?.let { "${it.width}×${it.height}" } ?: "<unknown>"}")
+                appendLine("  Fallback:  ${if (captureFallback) "YES ⚠️" else "NO"}")
+                appendLine("  Supported (top 10): ${formatSizesForLog(supportedCapture)}")
+                appendLine()
+
+                appendLine("ANALYSIS USE CASE:")
+                appendLine("  Preferred: ${preferredAnalysis.width}×${preferredAnalysis.height}")
+                appendLine("  Selected:  ${selectedAnalysis?.let { "${it.width}×${it.height}" } ?: "<unknown>"}")
+                appendLine("  Fallback:  ${if (analysisFallback) "YES ⚠️" else "NO"}")
+                appendLine("  Supported (top 10): ${formatSizesForLog(supportedAnalysis)}")
+                appendLine()
+
+                if (captureFallback || analysisFallback) {
+                    appendLine("WARNINGS:")
+                    if (captureFallback) {
+                        appendLine("  - Capture resolution negotiated from preferred; check HAL constraints")
+                    }
+                    if (analysisFallback) {
+                        appendLine("  - Analysis resolution negotiated from preferred; check HAL constraints")
+                    }
+                }
+
+                selectedCapture?.let { size ->
+                    if (size.width * size.height < preferredCapture.width * preferredCapture.height) {
+                        appendLine("  - CAPTURE: Possible upscaling from ${size.width}×${size.height} to ${preferredCapture.width}×${preferredCapture.height}")
+                    }
+                }
+
+                selectedAnalysis?.let { size ->
+                    if (size.width * size.height < preferredAnalysis.width * preferredAnalysis.height) {
+                        appendLine("  - ANALYSIS: Possible upscaling from ${size.width}×${size.height} to ${preferredAnalysis.width}×${preferredAnalysis.height}")
+                    }
+                }
+
+                appendLine()
+                appendLine("============================================================")
+            }
+
+            file.writeText(report)
+            Log.i(TAG, "Resolution negotiation report written to ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write resolution negotiation report: ${e.message}", e)
+        }
     }
 }
