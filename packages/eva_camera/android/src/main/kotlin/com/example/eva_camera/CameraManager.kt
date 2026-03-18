@@ -1,6 +1,7 @@
 package com.example.eva_camera
 
 import android.content.Context
+import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
@@ -9,6 +10,8 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.RggbChannelVector
+import android.hardware.camera2.params.StreamConfigurationMap
+import android.graphics.ImageFormat
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -35,6 +38,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.plugin.common.EventChannel
+import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -73,15 +77,25 @@ class CameraManager(
     private var imageAnalysis: ImageAnalysis? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraExecutor: ExecutorService? = null
+    // Single-thread executor for C++ analysis — separate from cameraExecutor so the
+    // camera thread is free (proxy already closed) while navigation runs.
+    private val analysisExecutor: ExecutorService =
+        Executors.newSingleThreadExecutor { Thread(it, "analysis-nav") }
 
     // ── Camera controls state ───────────────────────────────────────────
-    private var afEnabled: Boolean = true
+    private var afEnabled: Boolean = false
     private var aeEnabled: Boolean = false
     private var wbLocked: Boolean = false
     private var captureIntentPreview: Boolean = true
     private var captureFormatYuv: Boolean = true
     private var preferredCaptureSize: Size = Size(4208, 3120)
     private var preferredAnalysisSize: Size = Size(1280, 960)
+
+    // Center crop applied via SCALER_CROP_REGION — extracts a 1600×1200 region from the sensor.
+    // Null means no crop (use full active array).
+    private var sensorCropRect: Rect? = null
+    private val sensorCropWidth = 1600
+    private val sensorCropHeight = 1200
 
     // Manual sensor settings (app always starts with AE off)
     private var storedExposureTimeNs: Long = 1_000_000L // 1ms per PLAN_ARCH spec
@@ -96,6 +110,12 @@ class CameraManager(
 
     @Volatile private var availableAeTargetFpsRanges: Array<Range<Int>> = emptyArray()
     private var aeTargetFpsRange: Range<Int>? = null
+
+    // Resolution negotiation tracking
+    @Volatile private var captureFallbackDetected: Boolean = false
+    @Volatile private var analysisFallbackDetected: Boolean = false
+    @Volatile private var supportedCaptureSizes: List<String> = emptyList()
+    @Volatile private var supportedAnalysisSizes: List<String> = emptyList()
 
     // Focus distance captured from live AF results
     @Volatile private var capturedFocusDistance: Float? = null
@@ -233,6 +253,10 @@ class CameraManager(
         callback: (Map<String, Any>?, Exception?) -> Unit,
     ) {
         try {
+            // Log preferred sizes before bind attempt
+            Log.i(TAG, "RESOLUTION_NEGOTIATION: Preferred capture size = ${preferredCaptureSize.width}×${preferredCaptureSize.height}")
+            Log.i(TAG, "RESOLUTION_NEGOTIATION: Preferred analysis size = ${preferredAnalysisSize.width}×${preferredAnalysisSize.height}")
+
             // ── Resolution selectors ──
             val captureResolution =
                 ResolutionSelector
@@ -257,40 +281,47 @@ class CameraManager(
                     ).build()
 
             // ── Preview ──
-            val preview =
+            val previewBuilder =
                 Preview
                     .Builder()
-                    .setTargetRotation(Surface.ROTATION_0)
-                    .build()
-                    .also { it.setSurfaceProvider(pv.surfaceProvider) }
+            Camera2Interop
+                .Extender(previewBuilder)
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CameraMetadata.CONTROL_AF_MODE_OFF,
+                )
 
-            // ── ImageCapture (ZSL, output format from captureFormatYuv state) ──
-            val captureBuilder =
+            val preview = previewBuilder
+                .build()
+                .also { it.setSurfaceProvider(pv.surfaceProvider) }
+
+            // ── ImageCapture (MINIMIZE_LATENCY, RGBA_8888 for stitch path) ──────
+            imageCapture =
                 ImageCapture
                     .Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .setBufferFormat(android.graphics.PixelFormat.RGBA_8888)
                     .setResolutionSelector(captureResolution)
-                    .setTargetRotation(Surface.ROTATION_0)
+                    .build()
 
-            if (captureFormatYuv) {
-                captureBuilder.setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
-            }
-            imageCapture = captureBuilder.build()
-
-            // ── ImageAnalysis (YUV_420_888 for future C++ BGR conversion) ──
+            // ── ImageAnalysis (RGBA_8888 — single plane, 4 bytes/pixel) ──────────
             val analysisBuilder =
                 ImageAnalysis
                     .Builder()
                     .setResolutionSelector(analysisResolution)
                     .setOutputImageFormat(
-                        ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888,
+                        ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888,
                     ).setBackpressureStrategy(
                         ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST,
-                    ).setTargetRotation(Surface.ROTATION_0)
+                    )
 
             // Attach Camera2 capture callback to snoop live AWB/AF values
             Camera2Interop
                 .Extender(analysisBuilder)
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CameraMetadata.CONTROL_AF_MODE_OFF,
+                )
                 .setSessionCaptureCallback(
                     object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(
@@ -380,6 +411,25 @@ class CameraManager(
             // Load static characteristics (CCM, ranges) and dump to file
             loadStaticColorTransform(cam)
 
+            // Compute sensor center-crop rect from active array size.
+            // Applied as SCALER_CROP_REGION in applyAllCaptureOptions.
+            val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
+            val activeArray = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+            )
+            if (activeArray != null) {
+                val left = (activeArray.width() - sensorCropWidth) / 2
+                val top = (activeArray.height() - sensorCropHeight) / 2
+                sensorCropRect = Rect(left, top, left + sensorCropWidth, top + sensorCropHeight)
+                Log.i(TAG, "Sensor crop: activeArray=${activeArray.width()}x${activeArray.height()} cropRect=$sensorCropRect")
+            } else {
+                sensorCropRect = null
+                Log.w(TAG, "SENSOR_INFO_ACTIVE_ARRAY_SIZE unavailable — no center crop applied")
+            }
+
+            // Query and log resolution negotiation details
+            logResolutionNegotiation(cam)
+
             // Reset frame counter
             frameCount = 0
             lastFpsTime = System.nanoTime()
@@ -416,6 +466,7 @@ class CameraManager(
         defaultAeTargetFpsRange = null
         availableAeTargetFpsRanges = emptyArray()
         aeTargetFpsRange = null
+        sensorCropRect = null
 
         val executor = cameraExecutor
         if (executor == null) {
@@ -435,16 +486,55 @@ class CameraManager(
         cameraExecutor = null
     }
 
+    /**
+     * Release all long-lived resources. Call this when the plugin is fully torn down
+     * (not just between camera sessions). Safe to call multiple times.
+     */
+    fun destroy() {
+        analysisExecutor.shutdown()
+    }
+
     // ── Frame processing (native-side only) ─────────────────────────────
 
     private fun processFrame(imageProxy: ImageProxy) {
-        try {
-            frameCount++
-
-            val processor = frameProcessor ?: return
-            processor.processFrame(imageProxy = imageProxy, captureResult = latestCaptureResult)
-        } finally {
+        frameCount++
+        val processor = frameProcessor
+        if (processor == null) {
             imageProxy.close()
+            return
+        }
+
+        // Copy pixel data and close the proxy immediately so the camera buffer
+        // is returned to the ISP pool before the expensive C++ analysis starts.
+        val plane    = imageProxy.planes[0]
+        val src      = plane.buffer
+        val t0copy   = System.currentTimeMillis()
+        val bytes    = ByteArray(src.remaining()).also { src.get(it) }
+        val copyMs   = System.currentTimeMillis() - t0copy
+        val w        = imageProxy.width
+        val h        = imageProxy.height
+        val stride   = plane.rowStride
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val ts       = imageProxy.imageInfo.timestamp
+        val result   = latestCaptureResult
+        imageProxy.close()   // released before C++ analysis begins
+        Log.d(TAG, "Analysis copy: ${w}x${h} size=${bytes.size / 1024}KB copyMs=$copyMs")
+
+        analysisExecutor.execute {
+            val shouldCapture = processor.processFrame(
+                buf         = ByteBuffer.wrap(bytes),
+                w           = w,
+                h           = h,
+                stride      = stride,
+                rotation    = rotation,
+                timestampNs = ts,
+                captureResult = result,
+            )
+            if (shouldCapture > 0.5f) {
+                captureStitchFrame { error ->
+                    if (error != null) Log.e(TAG, "Auto-stitch capture failed", error)
+                }
+            }
         }
     }
 
@@ -803,6 +893,9 @@ class CameraManager(
             result["analysisWidth"] = it.width
             result["analysisHeight"] = it.height
         }
+        // Add fallback detection flags for UI warnings
+        result["captureFallbackDetected"] = captureFallbackDetected
+        result["analysisFallbackDetected"] = analysisFallbackDetected
         return result
     }
 
@@ -958,6 +1051,11 @@ class CameraManager(
                 CameraMetadata.SHADING_MODE_FAST,
             )
 
+        // Center crop via SCALER_CROP_REGION — restricts all use cases to the same 1600×1200 window.
+        sensorCropRect?.let { crop ->
+            builder.setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION, crop)
+        }
+
         val future = camera2Control.setCaptureRequestOptions(builder.build())
         future.addListener(
             {
@@ -1010,5 +1108,195 @@ class CameraManager(
         val event = mutableMapOf<String, Any>("type" to type, "tag" to tag, "message" to message)
         if (data.isNotEmpty()) event["data"] = data
         mainHandler.post { eventSink?.success(event) }
+    }
+
+    /** Query Camera2 for supported output sizes for different formats. */
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun querySupportedSizes(cam: Camera, format: Int): List<Size> {
+        return try {
+            val cam2Info = Camera2CameraInfo.from(cam.cameraInfo)
+            val streamMap: StreamConfigurationMap? = cam2Info.getCameraCharacteristic(
+                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+            )
+            streamMap?.getOutputSizes(format)?.toList() ?: emptyList()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to query supported sizes for format $format: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Log resolution negotiation details: preferred, supported, and selected sizes. */
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun logResolutionNegotiation(cam: Camera) {
+        try {
+            // Get selected resolutions (actual negotiated sizes)
+            val selectedCaptureSize = imageCapture?.resolutionInfo?.resolution
+            val selectedAnalysisSize = imageAnalysis?.resolutionInfo?.resolution
+
+            // Query supported sizes for capture (JPEG format typically available)
+            val supportedCaptureSizesJpeg = querySupportedSizes(cam, ImageFormat.JPEG)
+            val supportedCaptureSizesRgba = querySupportedSizes(cam, ImageFormat.PRIVATE)
+
+            // Query supported sizes for analysis (YUV_420_888, RGBA_8888)
+            val supportedAnalysisSizesYuv = querySupportedSizes(cam, ImageFormat.YUV_420_888)
+            val supportedAnalysisSizesRgba = querySupportedSizes(cam, ImageFormat.PRIVATE)
+
+            // Format supported sizes as readable strings
+            val captureSizesStr = formatSizesForLog(
+                (supportedCaptureSizesJpeg + supportedCaptureSizesRgba).distinct().sortedByDescending { it.width * it.height }
+            )
+            val analysisSizesStr = formatSizesForLog(
+                (supportedAnalysisSizesYuv + supportedAnalysisSizesRgba).distinct().sortedByDescending { it.width * it.height }
+            )
+
+            supportedCaptureSizes = captureSizesStr.split(", ")
+            supportedAnalysisSizes = analysisSizesStr.split(", ")
+
+            // Log supported sizes
+            Log.i(TAG, "RESOLUTION_NEGOTIATION: Supported capture formats: $captureSizesStr")
+            Log.i(TAG, "RESOLUTION_NEGOTIATION: Supported analysis formats: $analysisSizesStr")
+
+            // Detect fallback for capture
+            val captureFallback = selectedCaptureSize?.let { size ->
+                if (size.width != preferredCaptureSize.width || size.height != preferredCaptureSize.height) {
+                    true
+                } else {
+                    false
+                }
+            } ?: false
+            captureFallbackDetected = captureFallback
+
+            // Detect fallback for analysis
+            val analysisFallback = selectedAnalysisSize?.let { size ->
+                if (size.width != preferredAnalysisSize.width || size.height != preferredAnalysisSize.height) {
+                    true
+                } else {
+                    false
+                }
+            } ?: false
+            analysisFallbackDetected = analysisFallback
+
+            // Log selected resolutions
+            selectedCaptureSize?.let { size ->
+                if (captureFallback) {
+                    Log.w(TAG, "RESOLUTION_NEGOTIATION: ⚠️ CAPTURE FALLBACK DETECTED: preferred ${preferredCaptureSize.width}×${preferredCaptureSize.height}, selected ${size.width}×${size.height}")
+                } else {
+                    Log.i(TAG, "RESOLUTION_NEGOTIATION: Selected capture size = ${size.width}×${size.height} (matches preferred)")
+                }
+            } ?: Log.w(TAG, "RESOLUTION_NEGOTIATION: Selected capture size = <unknown>")
+
+            selectedAnalysisSize?.let { size ->
+                if (analysisFallback) {
+                    Log.w(TAG, "RESOLUTION_NEGOTIATION: ⚠️ ANALYSIS FALLBACK DETECTED: preferred ${preferredAnalysisSize.width}×${preferredAnalysisSize.height}, selected ${size.width}×${size.height}")
+                } else {
+                    Log.i(TAG, "RESOLUTION_NEGOTIATION: Selected analysis size = ${size.width}×${size.height} (matches preferred)")
+                }
+            } ?: Log.w(TAG, "RESOLUTION_NEGOTIATION: Selected analysis size = <unknown>")
+
+            // Warn about upscaling (selected < preferred)
+            selectedCaptureSize?.let { size ->
+                if (size.width * size.height < preferredCaptureSize.width * preferredCaptureSize.height) {
+                    Log.w(TAG, "RESOLUTION_NEGOTIATION: ⚠️ CAPTURE UPSCALING RISK: HAL provides ${size.width}×${size.height} (${size.width * size.height} px), may upscale to preferred ${preferredCaptureSize.width}×${preferredCaptureSize.height} (${preferredCaptureSize.width * preferredCaptureSize.height} px)")
+                }
+            }
+
+            selectedAnalysisSize?.let { size ->
+                if (size.width * size.height < preferredAnalysisSize.width * preferredAnalysisSize.height) {
+                    Log.w(TAG, "RESOLUTION_NEGOTIATION: ⚠️ ANALYSIS UPSCALING RISK: HAL provides ${size.width}×${size.height} (${size.width * size.height} px), may upscale to preferred ${preferredAnalysisSize.width}×${preferredAnalysisSize.height} (${preferredAnalysisSize.width * preferredAnalysisSize.height} px)")
+                }
+            }
+
+            // Write to file for persistent logging
+            dumpResolutionNegotiationReport(
+                preferredCapture = preferredCaptureSize,
+                selectedCapture = selectedCaptureSize,
+                supportedCapture = supportedCaptureSizesJpeg + supportedCaptureSizesRgba,
+                captureFallback = captureFallback,
+                preferredAnalysis = preferredAnalysisSize,
+                selectedAnalysis = selectedAnalysisSize,
+                supportedAnalysis = supportedAnalysisSizesYuv + supportedAnalysisSizesRgba,
+                analysisFallback = analysisFallback,
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to log resolution negotiation: ${e.message}", e)
+        }
+    }
+
+    /** Format a list of sizes for human-readable logging. */
+    private fun formatSizesForLog(sizes: List<Size>): String {
+        return sizes.distinct().sortedByDescending { it.width * it.height }
+            .take(10)  // Limit to top 10 to avoid spam
+            .joinToString(", ") { "${it.width}×${it.height}" }
+    }
+
+    /** Write resolution negotiation report to app external files directory. */
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun dumpResolutionNegotiationReport(
+        preferredCapture: Size,
+        selectedCapture: Size?,
+        supportedCapture: List<Size>,
+        captureFallback: Boolean,
+        preferredAnalysis: Size,
+        selectedAnalysis: Size?,
+        supportedAnalysis: List<Size>,
+        analysisFallback: Boolean,
+    ) {
+        try {
+            val timestamp = System.currentTimeMillis()
+            val filename = "resolution_negotiation_$timestamp.txt"
+            val file = java.io.File(context.getExternalFilesDir(null), filename)
+
+            val report = buildString {
+                appendLine("============================================================")
+                appendLine("CameraX Resolution Negotiation Report")
+                appendLine("============================================================")
+                appendLine("Timestamp: $timestamp")
+                appendLine()
+
+                appendLine("CAPTURE USE CASE:")
+                appendLine("  Preferred: ${preferredCapture.width}×${preferredCapture.height}")
+                appendLine("  Selected:  ${selectedCapture?.let { "${it.width}×${it.height}" } ?: "<unknown>"}")
+                appendLine("  Fallback:  ${if (captureFallback) "YES ⚠️" else "NO"}")
+                appendLine("  Supported (top 10): ${formatSizesForLog(supportedCapture)}")
+                appendLine()
+
+                appendLine("ANALYSIS USE CASE:")
+                appendLine("  Preferred: ${preferredAnalysis.width}×${preferredAnalysis.height}")
+                appendLine("  Selected:  ${selectedAnalysis?.let { "${it.width}×${it.height}" } ?: "<unknown>"}")
+                appendLine("  Fallback:  ${if (analysisFallback) "YES ⚠️" else "NO"}")
+                appendLine("  Supported (top 10): ${formatSizesForLog(supportedAnalysis)}")
+                appendLine()
+
+                if (captureFallback || analysisFallback) {
+                    appendLine("WARNINGS:")
+                    if (captureFallback) {
+                        appendLine("  - Capture resolution negotiated from preferred; check HAL constraints")
+                    }
+                    if (analysisFallback) {
+                        appendLine("  - Analysis resolution negotiated from preferred; check HAL constraints")
+                    }
+                }
+
+                selectedCapture?.let { size ->
+                    if (size.width * size.height < preferredCapture.width * preferredCapture.height) {
+                        appendLine("  - CAPTURE: Possible upscaling from ${size.width}×${size.height} to ${preferredCapture.width}×${preferredCapture.height}")
+                    }
+                }
+
+                selectedAnalysis?.let { size ->
+                    if (size.width * size.height < preferredAnalysis.width * preferredAnalysis.height) {
+                        appendLine("  - ANALYSIS: Possible upscaling from ${size.width}×${size.height} to ${preferredAnalysis.width}×${preferredAnalysis.height}")
+                    }
+                }
+
+                appendLine()
+                appendLine("============================================================")
+            }
+
+            file.writeText(report)
+            Log.i(TAG, "Resolution negotiation report written to ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write resolution negotiation report: ${e.message}", e)
+        }
     }
 }
