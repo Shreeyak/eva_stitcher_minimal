@@ -37,7 +37,7 @@ class MainActivity : FlutterActivity() {
                     imageProxy: ImageProxy,
                     captureResult: TotalCaptureResult?,
                 ): Float {
-                    NativeStitcher.processAnalysisFrame(
+                    val shouldCapture = NativeStitcher.processAnalysisFrame(
                         imageProxy.planes[0].buffer,
                         imageProxy.width,
                         imageProxy.height,
@@ -45,7 +45,7 @@ class MainActivity : FlutterActivity() {
                         imageProxy.imageInfo.rotationDegrees,
                         imageProxy.imageInfo.timestamp,
                     )
-                    return 0f
+                    return if (shouldCapture) 1.0f else 0.0f
                 }
             },
         )
@@ -61,14 +61,21 @@ class MainActivity : FlutterActivity() {
             },
         )
 
-        // StitchFrameProcessor is unused in v3 (inline analysis-only stitch path).
         EvaCameraPlugin.setStitchFrameProcessor(
             object : StitchFrameProcessor {
                 override fun onStitchFrame(
                     imageProxy: ImageProxy,
                     captureResult: TotalCaptureResult?,
                 ) {
-                    // No-op: stitching is now inline in processAnalysisFrame.
+                    val plane = imageProxy.planes[0]  // RGBA_8888: single plane
+                    NativeStitcher.processStitchFrame(
+                        frameBuf    = plane.buffer,
+                        w           = imageProxy.width,
+                        h           = imageProxy.height,
+                        stride      = plane.rowStride,
+                        rotation    = imageProxy.imageInfo.rotationDegrees,
+                        timestampNs = imageProxy.imageInfo.timestamp,
+                    )
                 }
             },
         )

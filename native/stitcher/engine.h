@@ -25,7 +25,16 @@ public:
 
     // Called every analysis frame (~30fps) on the CameraX executor thread.
     // framePtr is valid only during this call; do not hold a reference.
-    void processAnalysisFrame(
+    // Returns true when the capture gate fires — Kotlin should call captureStitchFrame().
+    bool processAnalysisFrame(
+        const uint8_t* framePtr,
+        int w, int h, int stride,
+        int rotation, int64_t timestampNs);
+
+    // Called once per stitch capture, on the CameraX executor thread.
+    // framePtr is an RGBA8888 buffer from ImageCapture (same format as analysis).
+    // Uses the pose stored when processAnalysisFrame last returned true.
+    void processStitchFrame(
         const uint8_t* framePtr,
         int w, int h, int stride,
         int rotation, int64_t timestampNs);
@@ -66,8 +75,9 @@ private:
     int _analysisH = 0;
 
     bool _scanningActive = false;
-    bool _captureInProgress = false;
     bool _initialized = false;
+
+    Pose _pendingCapturePose;   // pose at the moment the capture gate last fired
 
     NavigationState _navState;
 

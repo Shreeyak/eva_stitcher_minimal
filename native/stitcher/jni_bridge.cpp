@@ -29,7 +29,7 @@ Java_com_example_eva_1minimal_1demo_NativeStitcher_initEngine(
 
 // ── processAnalysisFrame ──────────────────────────────────────────────────
 
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_example_eva_1minimal_1demo_NativeStitcher_processAnalysisFrame(
     JNIEnv* env, jclass /*clazz*/,
     jobject frameBuf,
@@ -38,16 +38,43 @@ Java_com_example_eva_1minimal_1demo_NativeStitcher_processAnalysisFrame(
 {
     if (!gEngine) {
         LOGE("processAnalysisFrame called before initEngine");
-        return;
+        return JNI_FALSE;
     }
 
     auto* framePtr = static_cast<const uint8_t*>(env->GetDirectBufferAddress(frameBuf));
     if (!framePtr) {
         LOGE("processAnalysisFrame: null ByteBuffer pointer");
+        return JNI_FALSE;
+    }
+
+    const bool gate = gEngine->processAnalysisFrame(
+        framePtr,
+        static_cast<int>(w), static_cast<int>(h), static_cast<int>(stride),
+        static_cast<int>(rotation), static_cast<int64_t>(timestampNs));
+    return gate ? JNI_TRUE : JNI_FALSE;
+}
+
+// ── processStitchFrame ────────────────────────────────────────────────────
+
+JNIEXPORT void JNICALL
+Java_com_example_eva_1minimal_1demo_NativeStitcher_processStitchFrame(
+    JNIEnv* env, jclass /*clazz*/,
+    jobject frameBuf,
+    jint w, jint h, jint stride,
+    jint rotation, jlong timestampNs)
+{
+    if (!gEngine) {
+        LOGE("processStitchFrame called before initEngine");
         return;
     }
 
-    gEngine->processAnalysisFrame(
+    auto* framePtr = static_cast<const uint8_t*>(env->GetDirectBufferAddress(frameBuf));
+    if (!framePtr) {
+        LOGE("processStitchFrame: null ByteBuffer pointer");
+        return;
+    }
+
+    gEngine->processStitchFrame(
         framePtr,
         static_cast<int>(w), static_cast<int>(h), static_cast<int>(stride),
         static_cast<int>(rotation), static_cast<int64_t>(timestampNs));

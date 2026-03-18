@@ -277,7 +277,15 @@ GatingResult Navigation::evaluateGating(int64_t timestampNs,
 {
     if (!scanningActive)                              return {false, "not_scanning"};
     if (_trackingState != TrackingState::TRACKING)    return {false, "tracking_lost"};
-    if (_captureInProgress)                           return {false, "in_progress"};
+    if (_captureInProgress) {
+        // Auto-clear if the stitch frame never arrived (e.g. capture error).
+        if (timestampNs - _lastCaptureTimeNs > 2'000'000'000LL) {
+            _captureInProgress = false;
+            LOGI("evaluateGating: captureInProgress timeout — resetting");
+        } else {
+            return {false, "in_progress"};
+        }
+    }
     if (_lastCaptureTimeNs > 0 &&
         (timestampNs - _lastCaptureTimeNs) < COOLDOWN_NS)
                                                       return {false, "cooldown"};

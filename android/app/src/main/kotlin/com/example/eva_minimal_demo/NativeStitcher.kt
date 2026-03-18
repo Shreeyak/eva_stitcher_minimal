@@ -36,9 +36,25 @@ object NativeStitcher {
      * Process one RGBA8888 analysis frame.
      * The ByteBuffer must be direct (GetDirectBufferAddress — no copy).
      * The buffer is only valid during this call; do not hold a reference.
+     * Returns true when the capture gate fires — Kotlin should call captureStitchFrame().
      */
     @JvmStatic
     external fun processAnalysisFrame(
+        frameBuf: ByteBuffer,
+        w: Int,
+        h: Int,
+        stride: Int,
+        rotation: Int,
+        timestampNs: Long,
+    ): Boolean
+
+    /**
+     * Stitch a full-resolution RGBA_8888 ImageCapture frame.
+     * Call this once per gate trigger, on the capture callback thread.
+     * Uses the pose stored when processAnalysisFrame last returned true.
+     */
+    @JvmStatic
+    external fun processStitchFrame(
         frameBuf: ByteBuffer,
         w: Int,
         h: Int,

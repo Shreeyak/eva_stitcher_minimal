@@ -35,7 +35,6 @@ void Engine::init(int analysisW, int analysisH, const std::string& cacheDir) {
     _canvas->init(CANVAS_FRAME_W, CANVAS_FRAME_H, cacheDir);
 
     _scanningActive    = false;
-    _captureInProgress = false;
     _initialized       = true;
 
     LOGI("initEngine: analysis=%dx%d navFrame=%dx%d navScale=%.3f cacheDir=%s",
@@ -44,12 +43,12 @@ void Engine::init(int analysisW, int analysisH, const std::string& cacheDir) {
          cacheDir.c_str());
 }
 
-void Engine::processAnalysisFrame(
+bool Engine::processAnalysisFrame(
     const uint8_t* framePtr,
     int w, int h, int stride,
     int rotation, int64_t timestampNs)
 {
-    if (!_initialized) return;
+    if (!_initialized) return false;
 
     const int64_t t0 = nowMs();
 
@@ -77,37 +76,42 @@ void Engine::processAnalysisFrame(
         _navState = snap;
     }
 
-    // ── Step 4: Inline stitch commit when gating passes ───────────────────
-    if (triggerCommit && !_captureInProgress) {
-        _captureInProgress = true;
+    // ── Step 4: Gate fired — store pose and signal Kotlin to capture ───────
+    if (triggerCommit) {
+        _pendingCapturePose = _nav->getCurrentPose();
+        LOGI("processAnalysisFrame gate fired: pose=(%.1f,%.1f) — awaiting capture",
+             _pendingCapturePose.x, _pendingCapturePose.y);
+        return true;
+    }
+    return false;
+}
 
-        const int64_t tDownscale = nowMs();
-        cv::Mat canvasFrame = downscaleFrame(framePtr, w, h, stride);
-        const int64_t downscaleMs = nowMs() - tDownscale;
+void Engine::processStitchFrame(
+    const uint8_t* framePtr,
+    int w, int h, int stride,
+    int /*rotation*/, int64_t /*timestampNs*/)
+{
+    if (!_initialized) return;
 
-        Pose pose = _nav->getCurrentPose();
+    const int64_t t0 = nowMs();
 
-        const int64_t tComposite = nowMs();
-        _canvas->compositeFrame(canvasFrame, pose);
-        const int64_t compositeMs = nowMs() - tComposite;
+    // Downscale 4K RGBA → 800×600 BGR, rotate 180° — same path as analysis stitch.
+    cv::Mat canvasFrame = downscaleFrame(framePtr, w, h, stride);
 
-        _nav->onFrameCommitted();
-        _captureInProgress = false;
+    _canvas->compositeFrame(canvasFrame, _pendingCapturePose);
+    _nav->onFrameCommitted();
 
-        LOGI("processAnalysisFrame commit: downscaleMs=%lld compositeMs=%lld totalMs=%lld",
-             (long long)downscaleMs, (long long)compositeMs,
-             (long long)(nowMs() - t0));
+    const int64_t compositeMs = nowMs() - t0;
+    LOGI("processStitchFrame commit: src=%dx%d compositeMs=%lld",
+         w, h, (long long)compositeMs);
 
-        // Refresh navState with updated framesCaptured and canvas bounds
-        NavigationState commitSnap = _nav->getState();
-        commitSnap.analysisTimeMs  = snap.analysisTimeMs;
-        commitSnap.compositeTimeMs = static_cast<float>(compositeMs);
-        _canvas->getBounds(commitSnap.canvasMinX, commitSnap.canvasMinY,
-                           commitSnap.canvasMaxX, commitSnap.canvasMaxY);
-        {
-            std::lock_guard<std::mutex> lock(_stateMutex);
-            _navState = commitSnap;
-        }
+    NavigationState snap = _nav->getState();
+    snap.compositeTimeMs = static_cast<float>(compositeMs);
+    _canvas->getBounds(snap.canvasMinX, snap.canvasMinY,
+                       snap.canvasMaxX, snap.canvasMaxY);
+    {
+        std::lock_guard<std::mutex> lock(_stateMutex);
+        _navState = snap;
     }
 }
 
@@ -125,8 +129,8 @@ void Engine::reset() {
     if (!_initialized) return;
     _nav->reset();
     _canvas->reset();
-    _captureInProgress = false;
-    _scanningActive    = false;
+    _pendingCapturePose = {};
+    _scanningActive     = false;
     std::lock_guard<std::mutex> lock(_stateMutex);
     _navState = NavigationState{};
 }

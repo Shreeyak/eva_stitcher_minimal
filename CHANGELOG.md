@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-17 (update 16)
+
+### ImageCapture stitch path
+
+- **Engine**: `processAnalysisFrame` now returns `bool` (gate fired); removes inline stitch block. Stores `_pendingCapturePose` on gate fire. New `processStitchFrame()` stitches from stored pose.
+- **JNI / Kotlin**: `processAnalysisFrame` returns `jboolean`/`Boolean`; new `processStitchFrame` JNI entry and Kotlin extern.
+- **CameraManager**: ImageCapture switched to `MINIMIZE_LATENCY` + `PixelFormat.RGBA_8888`; auto-triggers `captureStitchFrame()` when `processFrame` returns `> 0.5f`.
+- **MainActivity**: `FrameProcessor` returns gate float; `StitchFrameProcessor` forwards single RGBA plane to `NativeStitcher.processStitchFrame`.
+
 ## 2026-03-17 (update 15)
 
 ### Phase 7 — UI Integration

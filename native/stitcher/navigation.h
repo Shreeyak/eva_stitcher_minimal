@@ -62,7 +62,7 @@ private:
     float   _sharpness       = 0.0f;
     float   _quality         = 0.0f;
     float   _overlapRatio    = 0.0f;
-    bool    _captureInProgress = false;
+    mutable bool _captureInProgress = false;
 
     // ── Timing / gating ───────────────────────────────────────────────────
     int64_t _lastCaptureTimeNs  = 0;

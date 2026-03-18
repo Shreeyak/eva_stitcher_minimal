@@ -278,17 +278,14 @@ class CameraManager(
                 .build()
                 .also { it.setSurfaceProvider(pv.surfaceProvider) }
 
-            // ── ImageCapture (ZSL, output format from captureFormatYuv state) ──
-            val captureBuilder =
+            // ── ImageCapture (MINIMIZE_LATENCY, RGBA_8888 for stitch path) ──────
+            imageCapture =
                 ImageCapture
                     .Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .setBufferFormat(android.graphics.PixelFormat.RGBA_8888)
                     .setResolutionSelector(captureResolution)
-
-            if (captureFormatYuv) {
-                captureBuilder.setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
-            }
-            imageCapture = captureBuilder.build()
+                    .build()
 
             // ── ImageAnalysis (RGBA_8888 — single plane, 4 bytes/pixel) ──────────
             val analysisBuilder =
@@ -476,7 +473,12 @@ class CameraManager(
             frameCount++
 
             val processor = frameProcessor ?: return
-            processor.processFrame(imageProxy = imageProxy, captureResult = latestCaptureResult)
+            val shouldCapture = processor.processFrame(imageProxy = imageProxy, captureResult = latestCaptureResult)
+            if (shouldCapture > 0.5f) {
+                captureStitchFrame { error ->
+                    if (error != null) Log.e(TAG, "Auto-stitch capture failed", error)
+                }
+            }
         } finally {
             imageProxy.close()
         }
