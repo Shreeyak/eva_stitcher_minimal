@@ -82,24 +82,26 @@ class MainActivity : FlutterActivity() {
                 ) {
                     val plane = imageProxy.planes[0]  // RGBA_8888: single plane
 
-                    // Copy pixel data before returning so captureStill's finally block
-                    // can close the ImageProxy immediately — releasing the camera buffer
-                    // without waiting for the expensive C++ downscale+composite.
+                    // Copy pixel data into a direct ByteBuffer before returning so
+                    // captureStill's finally block can close the ImageProxy immediately.
+                    // Direct ByteBuffer: no Java GC pressure + JNI GetDirectBufferAddress works.
                     val buf = plane.buffer
                     val t0copy = System.currentTimeMillis()
-                    val bytes = ByteArray(buf.remaining()).also { buf.get(it) }
+                    val direct = ByteBuffer.allocateDirect(buf.remaining())
+                    direct.put(buf)
+                    direct.rewind()
                     val copyMs = System.currentTimeMillis() - t0copy
                     val w       = imageProxy.width
                     val h       = imageProxy.height
                     val stride  = plane.rowStride
                     val rotation = imageProxy.imageInfo.rotationDegrees
                     val tsNs    = imageProxy.imageInfo.timestamp
-                    Log.i(TAG, "Stitch copy: ${w}x${h} size=${bytes.size / 1024}KB copyMs=$copyMs")
+                    Log.i(TAG, "Stitch copy: ${w}x${h} size=${direct.capacity() / 1024}KB copyMs=$copyMs")
 
                     // Return here — imageProxy.close() fires in captureStill's finally block.
                     stitchExecutor.execute {
                         NativeStitcher.processStitchFrame(
-                            frameBuf    = ByteBuffer.wrap(bytes),
+                            frameBuf    = direct,
                             w           = w,
                             h           = h,
                             stride      = stride,

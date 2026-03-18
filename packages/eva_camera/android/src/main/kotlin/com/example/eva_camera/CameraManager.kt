@@ -489,12 +489,15 @@ class CameraManager(
             return
         }
 
-        // Copy pixel data and close the proxy immediately so the camera buffer
-        // is returned to the ISP pool before the expensive C++ analysis starts.
+        // Copy pixel data into a direct ByteBuffer and close the proxy immediately:
+        // - Direct ByteBuffer uses native (C) memory — no Java GC pressure at 30fps.
+        // - JNI's GetDirectBufferAddress only works on direct buffers (heap buffers return null).
         val plane    = imageProxy.planes[0]
         val src      = plane.buffer
         val t0copy   = System.currentTimeMillis()
-        val bytes    = ByteArray(src.remaining()).also { src.get(it) }
+        val direct   = ByteBuffer.allocateDirect(src.remaining())
+        direct.put(src)
+        direct.rewind()
         val copyMs   = System.currentTimeMillis() - t0copy
         val w        = imageProxy.width
         val h        = imageProxy.height
@@ -503,11 +506,11 @@ class CameraManager(
         val ts       = imageProxy.imageInfo.timestamp
         val result   = latestCaptureResult
         imageProxy.close()   // released before C++ analysis begins
-        Log.d(TAG, "Analysis copy: ${w}x${h} size=${bytes.size / 1024}KB copyMs=$copyMs")
+        Log.d(TAG, "Analysis copy: ${w}x${h} size=${direct.capacity() / 1024}KB copyMs=$copyMs")
 
         analysisExecutor.execute {
             val shouldCapture = processor.processFrame(
-                buf         = ByteBuffer.wrap(bytes),
+                buf         = direct,
                 w           = w,
                 h           = h,
                 stride      = stride,

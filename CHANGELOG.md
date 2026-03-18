@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-18 (update 18)
+
+### Fix crash: heap ByteBuffer → allocateDirect for camera frame copies
+
+- **Root cause**: `ByteArray` allocations at 30fps (~5 MB/frame) generated ~150 MB/s Java heap churn. The GC's `userfaultfd UFFDIO_MOVE` ioctl was timing out on this device, hanging the GC thread and killing the process.
+- **Fix**: Both `CameraManager.processFrame` and `MainActivity.onStitchFrame` now copy into `ByteBuffer.allocateDirect` (native memory — no Java GC pressure). This also fixes a silent stitching bug: `ByteBuffer.wrap` (heap buffer) caused `GetDirectBufferAddress` to return null in JNI, so all analysis frames returned `shouldCapture=false` and no stitch frames were ever composited.
+
 ## 2026-03-17 (update 17)
 
 ### Fix CAMERA_START_FAILED + missing UI (regression from update 16)
