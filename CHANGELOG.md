@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-18 (update 20)
+
+### Fix CAMERA_START_FAILED: replace unsupported `setBufferFormat(RGBA_8888)` on ImageCapture
+
+- `setBufferFormat(PixelFormat.RGBA_8888)` on `ImageCapture` requires native camera HAL support and fails on most devices (`No available output size found`). Removed it; ImageCapture now uses default JPEG format.
+- Updated `onStitchFrame` in `MainActivity` to decode JPEG → `Bitmap` → RGBA `ByteBuffer` before passing to C++ `processStitchFrame`. Layout matches `ImageAnalysis` RGBA_8888 so no C++ changes needed.
+
 ## 2026-03-18 (update 19)
 
 ### Lock app to landscape-right orientation

@@ -283,12 +283,13 @@ class CameraManager(
                 .build()
                 .also { it.setSurfaceProvider(pv.surfaceProvider) }
 
-            // ── ImageCapture (MINIMIZE_LATENCY, RGBA_8888 for stitch path) ──────
+            // ── ImageCapture (MINIMIZE_LATENCY, JPEG default) ──────────────────
+            // JPEG is universally supported. onStitchFrame decodes to RGBA before C++.
+            // setBufferFormat(RGBA_8888) is hardware-dependent and fails on many devices.
             imageCapture =
                 ImageCapture
                     .Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                    .setBufferFormat(android.graphics.PixelFormat.RGBA_8888)
                     .setResolutionSelector(captureResolution)
                     .build()
 

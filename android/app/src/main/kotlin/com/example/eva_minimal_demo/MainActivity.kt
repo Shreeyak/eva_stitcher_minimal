@@ -1,6 +1,8 @@
 package com.example.eva_minimal_demo
 
 import android.content.ContentValues
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.hardware.camera2.TotalCaptureResult
 import android.net.Uri
 import android.os.Environment
@@ -80,31 +82,33 @@ class MainActivity : FlutterActivity() {
                     imageProxy: ImageProxy,
                     captureResult: TotalCaptureResult?,
                 ) {
-                    val plane = imageProxy.planes[0]  // RGBA_8888: single plane
-
-                    // Copy pixel data into a direct ByteBuffer before returning so
-                    // captureStill's finally block can close the ImageProxy immediately.
-                    // Direct ByteBuffer: no Java GC pressure + JNI GetDirectBufferAddress works.
-                    val buf = plane.buffer
-                    val t0copy = System.currentTimeMillis()
-                    val direct = ByteBuffer.allocateDirect(buf.remaining())
-                    direct.put(buf)
-                    direct.rewind()
-                    val copyMs = System.currentTimeMillis() - t0copy
-                    val w       = imageProxy.width
-                    val h       = imageProxy.height
-                    val stride  = plane.rowStride
+                    // ImageCapture delivers JPEG. Copy bytes and close proxy immediately.
+                    val jpegBuf = imageProxy.planes[0].buffer
+                    val jpegBytes = ByteArray(jpegBuf.remaining()).also { jpegBuf.get(it) }
                     val rotation = imageProxy.imageInfo.rotationDegrees
-                    val tsNs    = imageProxy.imageInfo.timestamp
-                    Log.i(TAG, "Stitch copy: ${w}x${h} size=${direct.capacity() / 1024}KB copyMs=$copyMs")
+                    val tsNs = imageProxy.imageInfo.timestamp
+                    // imageProxy.close() fires in captureStill's finally block.
 
-                    // Return here — imageProxy.close() fires in captureStill's finally block.
                     stitchExecutor.execute {
+                        val t0 = System.currentTimeMillis()
+                        val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
+                            ?: run { Log.e(TAG, "Stitch: JPEG decode failed"); return@execute }
+                        val decodeMs = System.currentTimeMillis() - t0
+
+                        val w = bitmap.width
+                        val h = bitmap.height
+                        // copyPixelsToBuffer gives RGBA bytes (matching ImageAnalysis RGBA_8888 layout).
+                        val rgbaBuf = ByteBuffer.allocateDirect(w * h * 4)
+                        bitmap.copyPixelsToBuffer(rgbaBuf)
+                        rgbaBuf.rewind()
+                        bitmap.recycle()
+                        Log.i(TAG, "Stitch JPEG→RGBA: ${w}x${h} decodeMs=$decodeMs")
+
                         NativeStitcher.processStitchFrame(
-                            frameBuf    = direct,
+                            frameBuf    = rgbaBuf,
                             w           = w,
                             h           = h,
-                            stride      = stride,
+                            stride      = w * 4,
                             rotation    = rotation,
                             timestampNs = tsNs,
                         )
