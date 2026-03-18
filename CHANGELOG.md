@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-18 (update 21)
+
+### Fix: first frame never committed — skip velocity gate for bootstrap anchor
+
+- `evaluateGating` now short-circuits for `_framesCaptured == 0`: only `scanningActive`, `TRACKING`, and sharpness are required. Velocity and distance checks are skipped because there is no existing canvas for the anchor frame to misregister against.
+
 ## 2026-03-18 (update 20)
 
 ### Fix CAMERA_START_FAILED: replace unsupported `setBufferFormat(RGBA_8888)` on ImageCapture

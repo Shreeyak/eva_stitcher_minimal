@@ -286,18 +286,24 @@ GatingResult Navigation::evaluateGating(int64_t timestampNs,
             return {false, "in_progress"};
         }
     }
+
+    // Bootstrap anchor (first frame): skip velocity and distance — no canvas yet so
+    // motion blur won't cause misregistration. Only sharpness matters.
+    if (_framesCaptured == 0) {
+        if (_sharpness < SHARPNESS_THRESHOLD)         return {false, "sharpness_too_low"};
+        return {true, "ok"};
+    }
+
     if (_lastCaptureTimeNs > 0 &&
         (timestampNs - _lastCaptureTimeNs) < COOLDOWN_NS)
                                                       return {false, "cooldown"};
     if (!isVelocityStable(timestampNs))               return {false, "velocity_too_high"};
     if (_sharpness < SHARPNESS_THRESHOLD)             return {false, "sharpness_too_low"};
 
-    if (_framesCaptured > 0) {
-        const float dist = std::hypot(_pose.x - _lastCapturePose.x,
-                                       _pose.y - _lastCapturePose.y);
-        if (dist < MIN_CAPTURE_DISTANCE)              return {false, "distance_too_small"};
-        if (overlapRatio > OVERLAP_REJECT_THRESHOLD)  return {false, "overlap_too_high"};
-    }
+    const float dist = std::hypot(_pose.x - _lastCapturePose.x,
+                                   _pose.y - _lastCapturePose.y);
+    if (dist < MIN_CAPTURE_DISTANCE)                  return {false, "distance_too_small"};
+    if (overlapRatio > OVERLAP_REJECT_THRESHOLD)      return {false, "overlap_too_high"};
 
     return {true, "ok"};
 }
