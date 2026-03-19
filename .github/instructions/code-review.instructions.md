@@ -1,12 +1,12 @@
 ---
-description: "Generic code review instructions that can be customized for any project using GitHub Copilot"
+description: "Code review instructions for the eva_minimal_demo Flutter/Kotlin/C++ WSI camera stitching app"
 applyTo: "**"
 excludeAgent: ["coding-agent"]
 ---
 
-# Generic Code Review Instructions
+# Code Review Instructions — eva_minimal_demo
 
-Comprehensive code review guidelines for GitHub Copilot that can be adapted to any project. These instructions follow best practices from prompt engineering and provide a structured approach to code quality, security, testing, and architecture review.
+Code review guidelines for the eva_minimal_demo whole slide imaging (WSI) app: a three-layer system (Flutter UI → Kotlin CameraX → C++ OpenCV stitching). Reviews cover correctness, architecture invariants, security, and performance across all three layers.
 
 ## Review Language
 
@@ -77,11 +77,10 @@ When performing a code review, check for security issues:
 
 - **Sensitive Data**: No passwords, API keys, tokens, or PII in code or logs
 - **Input Validation**: All user inputs are validated and sanitized
-- **SQL Injection**: Use parameterized queries, never string concatenation
 - **Authentication**: Proper authentication checks before accessing resources
-- **Authorization**: Verify user has permission to perform action
 - **Cryptography**: Use established libraries, never roll your own crypto
 - **Dependency Security**: Check for known vulnerabilities in dependencies
+- **Camera Data**: Raw frame data and captured images must not be leaked to unintended destinations
 
 ## Testing Standards
 
@@ -114,6 +113,35 @@ When performing a code review, verify architectural principles:
 - **Loose Coupling**: Components should be independently testable
 - **High Cohesion**: Related functionality grouped together
 - **Consistent Patterns**: Follow established patterns in the codebase
+
+## Project-Specific Architecture Rules
+
+### Flutter / Dart Layer (`lib/`)
+
+- **State management**: Use `StatefulWidget` + `setState`. Never introduce Provider, Riverpod, or Bloc. `ValueNotifier` is acceptable only for cross-widget state.
+- **Widget structure**: One widget per file in `lib/widgets/`. Prefer `StatelessWidget`; use `StatefulWidget` only when local mutable state is needed. Files must stay ≤ 300 lines.
+- **Data flow**: Pass callbacks down explicitly. No global state singletons.
+- **Theme**: Use `Theme.of(context).colorScheme` for all colours — never hardcode hex values. Use Material 3 components (`FilterChip`, `SegmentedButton`, etc.).
+- **Camera state**: Camera data classes live in `camera_state.dart`. Channel writes go through `CameraControl` → `CameraSettingsQueue` — never call MethodChannel directly from UI code.
+
+### Kotlin / Android Layer (`android/app/src/main/kotlin/…`)
+
+- **Camera encapsulation**: All CameraX and Camera2 logic must stay in `CameraManager.kt`. Do not scatter camera state or logic into `MainActivity.kt` or other files.
+- **New commands**: New `MethodChannel` commands are wired in `MainActivity.kt`'s `when` block but implemented in `CameraManager.kt`.
+- **Settings writes**: Every manual camera override **must** go through `applyAllCaptureOptions()`. Never call `setCaptureRequestOptions` for individual settings — it cancels prior pending futures and causes races.
+- **Sequential writes**: Camera2 `setCaptureRequestOptions` calls must be sequential (one at a time). Never use `Future.wait` / `awaitAll` for capture option writes.
+- **WB lock**: Lock white balance by capturing live CCM + gains while AWB is in auto mode, then replaying on lock. Do not hardcode WB gains.
+- **Processor registration**: `EvaCameraPlugin.set*Processor()` calls must come **before** `super.configureFlutterEngine()` in `MainActivity`. Calling them after `super()` leaves `CameraManager` with null processors.
+
+### C++ / OpenCV Layer (`android/app/src/main/cpp/`, `native/stitcher/`)
+
+- **Source location**: New JNI source files belong in `android/app/src/main/cpp/`; stitcher logic belongs in `native/stitcher/`. Wire via `externalNativeBuild` in `android/app/build.gradle.kts`.
+- **API choice**: Use the OpenCV C++ API only. Never use Java/Kotlin OpenCV bindings — the native library is at `android/opencv/`.
+- **No GPU**: `cv::cuda::`, `cv::ocl::`, and any OpenCL calls are forbidden. OpenCV is CPU-only in this project.
+- **Memory discipline**: Prefer in-place operations and pre-allocated buffers in per-frame paths. Avoid heap allocations inside the analysis/stitch callbacks.
+- **Lock ordering**: Acquire `Canvas::_canvasMutex` before `Engine::_stateMutex`. Never hold `_stateMutex` while calling `getBounds`, `compositeFrame`, or `renderPreview`.
+- **Frame format**: Analysis frames arrive as YUV `ImageProxy` (640×480). Canvas tiles use `CV_8UC3` BGR + `CV_8UC1` mask. No BGRA in the tile grid.
+- **Orientation**: Canvas frames require 180° rotation (`cv::ROTATE_180`) to match display orientation.
 
 ## Documentation Standards
 
@@ -161,9 +189,9 @@ When performing a code review, systematically verify:
 
 - [ ] No sensitive data in code or logs
 - [ ] Input validation on all user inputs
-- [ ] No SQL injection vulnerabilities
 - [ ] Authentication and authorization properly implemented
 - [ ] Dependencies are up-to-date and secure
+- [ ] Camera frame data not leaked to unintended destinations
 
 ### Testing
 
@@ -186,6 +214,17 @@ When performing a code review, systematically verify:
 - [ ] Proper separation of concerns
 - [ ] No architectural violations
 - [ ] Dependencies flow in correct direction
+- [ ] Flutter: no global state; callbacks passed down explicitly
+- [ ] Flutter: no hardcoded colours; `Theme.of(context).colorScheme` used
+- [ ] Flutter: no Provider/Riverpod/Bloc introduced
+- [ ] Kotlin: all camera logic in `CameraManager.kt`; `MainActivity.kt` only wires channels
+- [ ] Kotlin: all camera setting writes go through `applyAllCaptureOptions()`
+- [ ] Kotlin: no concurrent `setCaptureRequestOptions` calls (`Future.wait` forbidden)
+- [ ] Kotlin: processor `set*Processor()` calls placed before `super.configureFlutterEngine()`
+- [ ] C++: no `cv::cuda::` / `cv::ocl::` / OpenCL usage
+- [ ] C++: no per-frame heap allocations in hot paths
+- [ ] C++: lock ordering respected (`_canvasMutex` before `_stateMutex`)
+- [ ] CHANGELOG.md updated when a feature, algorithm, or implementation is added/modified/deleted
 
 ### Documentation
 
@@ -197,7 +236,9 @@ When performing a code review, systematically verify:
 ## Project Context
 
 - **Tech Stack**: Flutter (Dart), Kotlin (CameraX + Camera2), C++ / OpenCV
-- **Architecture**: Three-layer (Flutter UI → Kotlin camera → C++ stitching)
-- **Build Tool**: Flutter CLI, Gradle 8.12, AGP 8.9.x
-- **Testing**: `flutter test`, `flutter analyze`
-- **Code Style**: Minimal abstractions, plain StatefulWidget + setState, one widget per file
+- **Architecture**: Three-layer — Flutter UI (`lib/`) → Kotlin camera (`android/…/CameraManager.kt`) → C++ stitching (`native/stitcher/`, `android/app/src/main/cpp/`)
+- **Build Tool**: Flutter CLI, Gradle 8.12, AGP 8.9.x, NDK 27, C++17, `arm64-v8a` only, Java 17
+- **Testing**: `flutter test`, `flutter analyze`, `flutter build apk --debug`
+- **Code Style**: Minimal abstractions; plain `StatefulWidget` + `setState`; one widget per file ≤ 300 lines; Material 3 dark theme
+- **Channel names**: `PlatformView "camerax-preview"`, `MethodChannel "com.example.eva/control"`, `EventChannel "com.example.eva/events"`
+- **Key invariants**: All camera settings via `applyAllCaptureOptions()`; all camera logic in `CameraManager.kt`; sequential Camera2 writes only; CPU-only OpenCV; CHANGELOG.md updated on every feature change
