@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-19
+
+- Added `TextureViewBitmapCapture` and `GpuToCpuSurfaceProvider` for GPU→CPU camera frame readback (ML inference path).
+- Added `FrameReadbackActivity` integrating both methods via `USE_GL_METHOD` compile-time flag; toggled between PreviewView getBitmap() and EGL/PBO pipeline.
+- Added GLES 3.0 feature declaration to `AndroidManifest.xml`; registered `FrameReadbackActivity`.
+
 ## 2026-03-19 (update 22)
 
 ### Fix: `_captureInProgress` guard was dead code — set it when gate fires, clear on commit
