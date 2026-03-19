@@ -140,9 +140,9 @@ class CameraValues {
   const CameraValues({
     this.isoValue = 200,
     this.exposureTimeNs = 1000000,
-    this.focusDistance = 0.0,
+    this.focusDistance = 0.1,
     this.zoomRatio = 1.0,
-    this.afEnabled = true,
+    this.afEnabled = false,
     this.wbLocked = false,
   });
 
@@ -159,8 +159,8 @@ class CameraValues {
   /// Edit defaults here — not scattered across `_startCamera()`.
   factory CameraValues.initialFromRanges(CameraRanges ranges) {
     return CameraValues(
-      isoValue: 800.clamp(ranges.isoRange[0], ranges.isoRange[1]),
-      exposureTimeNs: 20000000.clamp(
+      isoValue: 100.clamp(ranges.isoRange[0], ranges.isoRange[1]),
+      exposureTimeNs: 250000.clamp(    // 1/4000 s
         ranges.exposureTimeRangeNs[0],
         ranges.exposureTimeRangeNs[1],
       ),
@@ -169,7 +169,7 @@ class CameraValues {
       // abrupt lens movement when AF is first toggled off.
       focusDistance: 0.1,
       zoomRatio: ranges.minZoomRatio,
-      afEnabled: true,
+      afEnabled: false,
       wbLocked: false,
     );
   }

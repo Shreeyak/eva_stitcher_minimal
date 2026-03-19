@@ -6,6 +6,123 @@
 - Added `FrameReadbackActivity` integrating both methods via `USE_GL_METHOD` compile-time flag; toggled between PreviewView getBitmap() and EGL/PBO pipeline.
 - Added GLES 3.0 feature declaration to `AndroidManifest.xml`; registered `FrameReadbackActivity`.
 
+## 2026-03-19 (update 22)
+
+### Fix: `_captureInProgress` guard was dead code — set it when gate fires, clear on commit
+
+- `Navigation::processFrame` now sets `_captureInProgress = true` immediately when the gate fires, preventing the bootstrap path (and all subsequent gates) from triggering another capture while the stitch frame is in-flight.
+- `Navigation::onFrameCommitted` now clears `_captureInProgress` (alongside the existing `_framesCaptured++`), so normal gating resumes only after each committed frame is acknowledged.
+
+## 2026-03-18 (update 21)
+
+### Fix: first frame never committed — skip velocity gate for bootstrap anchor
+
+- `evaluateGating` now short-circuits for `_framesCaptured == 0`: only `scanningActive`, `TRACKING`, and sharpness are required. Velocity and distance checks are skipped because there is no existing canvas for the anchor frame to misregister against.
+
+## 2026-03-18 (update 20)
+
+### Fix CAMERA_START_FAILED: replace unsupported `setBufferFormat(RGBA_8888)` on ImageCapture
+
+- `setBufferFormat(PixelFormat.RGBA_8888)` on `ImageCapture` requires native camera HAL support and fails on most devices (`No available output size found`). Removed it; ImageCapture now uses default JPEG format.
+- Updated `onStitchFrame` in `MainActivity` to decode JPEG → `Bitmap` → RGBA `ByteBuffer` before passing to C++ `processStitchFrame`. Layout matches `ImageAnalysis` RGBA_8888 so no C++ changes needed.
+
+## 2026-03-18 (update 19)
+
+### Lock app to landscape-right orientation
+
+- Added `android:screenOrientation="sensorLandscape"` to `AndroidManifest.xml`.
+- Prevents orientation-change config events from tearing down and recreating `CameraManager`, eliminating a whole class of camera-restart bugs.
+
+## 2026-03-18 (update 18)
+
+### Fix crash: heap ByteBuffer → allocateDirect for camera frame copies
+
+- **Root cause**: `ByteArray` allocations at 30fps (~5 MB/frame) generated ~150 MB/s Java heap churn. The GC's `userfaultfd UFFDIO_MOVE` ioctl was timing out on this device, hanging the GC thread and killing the process.
+- **Fix**: Both `CameraManager.processFrame` and `MainActivity.onStitchFrame` now copy into `ByteBuffer.allocateDirect` (native memory — no Java GC pressure). This also fixes a silent stitching bug: `ByteBuffer.wrap` (heap buffer) caused `GetDirectBufferAddress` to return null in JNI, so all analysis frames returned `shouldCapture=false` and no stitch frames were ever composited.
+
+## 2026-03-17 (update 17)
+
+### Fix CAMERA_START_FAILED + missing UI (regression from update 16)
+
+- **CameraManager**: Removed `analysisExecutor.shutdown()` from `stopCamera()`. Added `destroy()` (shuts down both executors) — only called at true plugin teardown.
+- **EvaCameraPlugin**: Calls `cameraManager?.destroy()` in `onDetachedFromEngine` for clean executor shutdown.
+- **InteractiveBottomBar**: Added `cameraReady` param; START/STOP FAB disabled (shows "NO CAMERA") when camera hasn't started. Bottom bar now always rendered — never gated on `_cameraStarted`.
+
+## 2026-03-17 (update 16)
+
+### ImageCapture stitch path
+
+- **Engine**: `processAnalysisFrame` now returns `bool` (gate fired); removes inline stitch block. Stores `_pendingCapturePose` on gate fire. New `processStitchFrame()` stitches from stored pose.
+- **JNI / Kotlin**: `processAnalysisFrame` returns `jboolean`/`Boolean`; new `processStitchFrame` JNI entry and Kotlin extern.
+- **CameraManager**: ImageCapture switched to `MINIMIZE_LATENCY` + `PixelFormat.RGBA_8888`; auto-triggers `captureStitchFrame()` when `processFrame` returns `> 0.5f`.
+- **MainActivity**: `FrameProcessor` returns gate float; `StitchFrameProcessor` forwards single RGBA plane to `NativeStitcher.processStitchFrame`.
+
+## 2026-03-17 (update 15)
+
+### Phase 7 — UI Integration
+
+- **InfoBar**: Renamed `BottomInfoBar` → `InfoBar`; removed placeholder `COVERAGE`/`totalTarget` chips; added `CONF` chip showing `lastConfidence` to 2 decimal places.
+- **VelocityBar + QualityBar**: Added vertical velocity bar (green→yellow→red, left of preview) and horizontal quality bar (red/yellow/green, below preview) driven by `NavigationState.speed/quality`.
+- **Capture flash**: Preview border pulses to full `colorScheme.primary` with glow for 300 ms each time `framesCaptured` increments.
+
+## 2026-03-17 (update 14)
+
+- **Rotate image buffers with OpenCV**: CameraX’s `setTargetRotation` is purely metadata, so we now rotate the analysis buffer and nav frames 180° via `cv::rotate`. This keeps the pipeline aligned with the preview while preserving the rotation flag expected by the platform.
+
+## 2026-03-17 (update 13)
+
+- **Disable autofocus for live scanning**: Both the preview and analysis use cases now request `CONTROL_AF_MODE_OFF` via Camera2Interop, and the AF state starts disabled so all capture options run in the same manual-control mode.
+
+## 2026-03-17 (update 11)
+
+- **Save canvas as single image**: Added `Canvas::saveCanvasAsImage` that composites all tiles into one PNG cropped to the written bounds. Wired through Engine → JNI → Kotlin → Dart. Single file published to `Pictures/EvaWSI/` via MediaStore.
+
+## 2026-03-17 (update 10)
+
+- **Save canvas to Pictures/EvaWSI**: Tiles now saved to public `Pictures/EvaWSI/` via MediaStore (API 29+ scoped storage — no runtime permissions required). Temp tiles written to cache first, then published via `ContentResolver`.
+
+## 2026-03-17 (update 9)
+
+- **Fix permission issue**: Changed canvas save destination from Pictures/EvaWSI (requires WRITE_EXTERNAL_STORAGE) to app cache directory (no permissions needed). Removed permission checks and manifest entries.
+
+## 2026-03-17 (update 8)
+
+- **UI refinements**: Removed unused EXPORT button; renamed SAVE to "SAVE CANVAS"; fixed SAVE CANVAS button to be enabled whenever canvas has data (framesCaptured > 0) rather than always greyed out.
+
+## 2026-03-17 (update 7)
+
+- **Quality improvements**: (1) Removed static placeholder image from mini-map; (2) Verified frames remain at full 1600×1200 resolution without downscaling; (3) Added "Save Canvas" button to bottom action bar that exports all committed canvas tiles to PNG files in Pictures/EvaWSI/.
+- **Canvas export**: Implemented `Canvas::saveAllTilesToDisk()` in native C++; wired through JNI and MethodChannel; added WRITE_EXTERNAL_STORAGE permission + Android 12+ runtime check.
+
+## 2026-03-17 (update 6)
+
+- **Rotation applied early in analysis pipeline**: Analysis frame is now rotated 180° immediately after green-channel extraction and downscaling, before being fed to navigation. Both nav frame and canvas frame now see the same rotated orientation, eliminating the need for pose negation and making the coordinate systems consistent throughout the pipeline.
+
+## 2026-03-17 (update 5)
+
+- **Sharpness threshold relaxed**: Lowered `SHARPNESS_THRESHOLD` from `0.15f` to `0.08f` in `native/stitcher/types.h` to reduce strictness of frame quality gating and accept a wider range of motion blur levels.
+- **Canvas frame 180° rotation**: Added `cv::rotate(..., cv::ROTATE_180)` to `Engine::downscaleFrame()` to correct orientation mismatch between camera sensor native orientation and preview display orientation.
+
+## 2026-03-17 (update 4)
+
+- **SCALER_CROP_REGION center-crop fix**: CameraManager now reads `SENSOR_INFO_ACTIVE_ARRAY_SIZE` on camera bind and computes a center-crop `Rect` (1600×1200 from sensor), applied via `CaptureRequest.SCALER_CROP_REGION` in `applyAllCaptureOptions`. All use cases (preview, capture, analysis) see the same cropped FOV, eliminating full-sensor lens distortion in the stitched output.
+
+## 2026-03-17 (update 3)
+
+- **Phase 3 (Tiled Canvas + Compositing)**: Replaced 4096×4096 monolithic stub with an `unordered_map`-backed LRU tile cache (`CV_8UC3` BGR pixels + `CV_8UC1` mask per tile — no alpha channel). Feather weight map pre-computed once at init via OpenCV mat ops. `compositeFrame` splits each tile subregion into interior (w=1, direct overwrite) and feather-band strips (w<1, blend only written pixels; direct copy for empty); float arithmetic is confined to the narrow feather band only. LRU eviction flushes dirty tiles to PNG on disk; `getTile` reloads from disk on cache miss. `renderPreview` uses a shared lock; `compositeFrame`/`reset` use exclusive lock; `getOverlapRatio` is lock-free (analysis thread only). `initEngine` now accepts a `cacheDir` string propagated from `MainActivity.kt` (`filesDir/tile_cache`) through JNI → `Engine::init` → `Canvas::init`.
+- **Phase 4 (Stitch Commit Wiring)**: Fixed lock-order inversion in `Engine::processAnalysisFrame` — `_canvas->getBounds()` (acquires `_canvasMutex`) is now called before `_stateMutex` is taken, preventing deadlock against `renderPreview` on the main thread. Canvas bounds (`canvasMinX/Y/MaxX/Y`) are now populated in `NavigationState` every frame and refreshed after each commit. Commit timing log now reports individual steps: `downscaleMs`, `compositeMs`, `totalMs`.
+
+## 2026-03-17 (update 2)
+
+- **RGBA8888 stitcher update**: Switched ImageAnalysis format from `YUV_420_888` to `RGBA_8888` in `CameraManager.kt`; replaced YUV 3-plane crop helpers (`cropY`/`cropYuvToBgr`) with RGBA helpers (`extractGreenDownscale`: G-channel → 640×480 nav, `downscaleRgba`: RGBA→BGR 800×600 canvas frame); replaced `CROP_RATIO` constant with fixed `NAV_FRAME_W=640`/`NAV_FRAME_H=480`.
+- Updated JNI bridge and `NativeStitcher.kt` to accept a single `rgbaBuf: ByteBuffer` + `stride: Int` instead of three YUV plane buffers; `MainActivity.kt` now passes `planes[0]` only.
+
+## 2026-03-17
+
+- **Phase 1 (JNI Zero-Copy + Build Scaffold)**: Replaced ByteArray frame path with ByteBuffer zero-copy JNI; added `jni_bridge.cpp`, `engine.h/cpp`, `canvas.h/cpp`, `types.h`; created `lib/stitcher/stitch_state.dart` (`NavigationState`, `StitchControl`); updated `NativeStitcher.kt` and `MainActivity.kt` with new stitch MethodChannel; camera now requests 1600×1200 analysis and calls `initEngine` after start.
+- **Phase 2 (Navigation Pipeline)**: Added `navigation.h/cpp` with phase correlation (`cv::phaseCorrelate` + Hanning window), velocity EMA + deadband, Laplacian sharpness, tracking FSM (INIT→TRACKING→UNCERTAIN→LOST), and full capture gating (8 checks, structured reason-code logs); wired inline stitch commit path in `Engine::processAnalysisFrame`.
+- Created OpenCV symlink `android/opencv → ../../eva_minimal_demo/android/opencv`; `CanvasView` now accepts `previewBytes` and displays live JPEG preview; nav state polled at 50ms via `Timer.periodic`.
+
 ## 2026-03-14
 
 - Extracted camera stack into reusable Flutter plugin at `packages/eva_camera/` (Dart + Kotlin/CameraX).

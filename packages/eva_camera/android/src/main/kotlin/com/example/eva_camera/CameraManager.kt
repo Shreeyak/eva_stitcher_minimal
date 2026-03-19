@@ -1,6 +1,7 @@
 package com.example.eva_camera
 
 import android.content.Context
+import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
@@ -35,6 +36,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import io.flutter.plugin.common.EventChannel
+import java.nio.ByteBuffer
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -73,15 +75,25 @@ class CameraManager(
     private var imageAnalysis: ImageAnalysis? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraExecutor: ExecutorService? = null
+    // Single-thread executor for C++ analysis — separate from cameraExecutor so the
+    // camera thread is free (proxy already closed) while navigation runs.
+    private val analysisExecutor: ExecutorService =
+        Executors.newSingleThreadExecutor { Thread(it, "analysis-nav") }
 
     // ── Camera controls state ───────────────────────────────────────────
-    private var afEnabled: Boolean = true
+    private var afEnabled: Boolean = false
     private var aeEnabled: Boolean = false
     private var wbLocked: Boolean = false
     private var captureIntentPreview: Boolean = true
     private var captureFormatYuv: Boolean = true
     private var preferredCaptureSize: Size = Size(4208, 3120)
     private var preferredAnalysisSize: Size = Size(1280, 960)
+
+    // Center crop applied via SCALER_CROP_REGION — extracts a 1600×1200 region from the sensor.
+    // Null means no crop (use full active array).
+    private var sensorCropRect: Rect? = null
+    private val sensorCropWidth = 1600
+    private val sensorCropHeight = 1200
 
     // Manual sensor settings (app always starts with AE off)
     private var storedExposureTimeNs: Long = 1_000_000L // 1ms per PLAN_ARCH spec
@@ -257,40 +269,48 @@ class CameraManager(
                     ).build()
 
             // ── Preview ──
-            val preview =
+            val previewBuilder =
                 Preview
                     .Builder()
-                    .setTargetRotation(Surface.ROTATION_0)
-                    .build()
-                    .also { it.setSurfaceProvider(pv.surfaceProvider) }
+            Camera2Interop
+                .Extender(previewBuilder)
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CameraMetadata.CONTROL_AF_MODE_OFF,
+                )
 
-            // ── ImageCapture (ZSL, output format from captureFormatYuv state) ──
-            val captureBuilder =
+            val preview = previewBuilder
+                .build()
+                .also { it.setSurfaceProvider(pv.surfaceProvider) }
+
+            // ── ImageCapture (MINIMIZE_LATENCY, JPEG default) ──────────────────
+            // JPEG is universally supported. onStitchFrame decodes to RGBA before C++.
+            // setBufferFormat(RGBA_8888) is hardware-dependent and fails on many devices.
+            imageCapture =
                 ImageCapture
                     .Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                     .setResolutionSelector(captureResolution)
-                    .setTargetRotation(Surface.ROTATION_0)
+                    .build()
 
-            if (captureFormatYuv) {
-                captureBuilder.setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
-            }
-            imageCapture = captureBuilder.build()
-
-            // ── ImageAnalysis (YUV_420_888 for future C++ BGR conversion) ──
+            // ── ImageAnalysis (RGBA_8888 — single plane, 4 bytes/pixel) ──────────
             val analysisBuilder =
                 ImageAnalysis
                     .Builder()
                     .setResolutionSelector(analysisResolution)
                     .setOutputImageFormat(
-                        ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888,
+                        ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888,
                     ).setBackpressureStrategy(
                         ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST,
-                    ).setTargetRotation(Surface.ROTATION_0)
+                    )
 
             // Attach Camera2 capture callback to snoop live AWB/AF values
             Camera2Interop
                 .Extender(analysisBuilder)
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AF_MODE,
+                    CameraMetadata.CONTROL_AF_MODE_OFF,
+                )
                 .setSessionCaptureCallback(
                     object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(
@@ -380,6 +400,22 @@ class CameraManager(
             // Load static characteristics (CCM, ranges) and dump to file
             loadStaticColorTransform(cam)
 
+            // Compute sensor center-crop rect from active array size.
+            // Applied as SCALER_CROP_REGION in applyAllCaptureOptions.
+            val camera2Info = Camera2CameraInfo.from(cam.cameraInfo)
+            val activeArray = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+            )
+            if (activeArray != null) {
+                val left = (activeArray.width() - sensorCropWidth) / 2
+                val top = (activeArray.height() - sensorCropHeight) / 2
+                sensorCropRect = Rect(left, top, left + sensorCropWidth, top + sensorCropHeight)
+                Log.i(TAG, "Sensor crop: activeArray=${activeArray.width()}x${activeArray.height()} cropRect=$sensorCropRect")
+            } else {
+                sensorCropRect = null
+                Log.w(TAG, "SENSOR_INFO_ACTIVE_ARRAY_SIZE unavailable — no center crop applied")
+            }
+
             // Reset frame counter
             frameCount = 0
             lastFpsTime = System.nanoTime()
@@ -416,6 +452,7 @@ class CameraManager(
         defaultAeTargetFpsRange = null
         availableAeTargetFpsRanges = emptyArray()
         aeTargetFpsRange = null
+        sensorCropRect = null
 
         val executor = cameraExecutor
         if (executor == null) {
@@ -435,16 +472,58 @@ class CameraManager(
         cameraExecutor = null
     }
 
+    /**
+     * Release all long-lived resources. Call this when the plugin is fully torn down
+     * (not just between camera sessions). Safe to call multiple times.
+     */
+    fun destroy() {
+        analysisExecutor.shutdown()
+    }
+
     // ── Frame processing (native-side only) ─────────────────────────────
 
     private fun processFrame(imageProxy: ImageProxy) {
-        try {
-            frameCount++
-
-            val processor = frameProcessor ?: return
-            processor.processFrame(imageProxy = imageProxy, captureResult = latestCaptureResult)
-        } finally {
+        frameCount++
+        val processor = frameProcessor
+        if (processor == null) {
             imageProxy.close()
+            return
+        }
+
+        // Copy pixel data into a direct ByteBuffer and close the proxy immediately:
+        // - Direct ByteBuffer uses native (C) memory — no Java GC pressure at 30fps.
+        // - JNI's GetDirectBufferAddress only works on direct buffers (heap buffers return null).
+        val plane    = imageProxy.planes[0]
+        val src      = plane.buffer
+        val t0copy   = System.currentTimeMillis()
+        val direct   = ByteBuffer.allocateDirect(src.remaining())
+        direct.put(src)
+        direct.rewind()
+        val copyMs   = System.currentTimeMillis() - t0copy
+        val w        = imageProxy.width
+        val h        = imageProxy.height
+        val stride   = plane.rowStride
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val ts       = imageProxy.imageInfo.timestamp
+        val result   = latestCaptureResult
+        imageProxy.close()   // released before C++ analysis begins
+        Log.d(TAG, "Analysis copy: ${w}x${h} size=${direct.capacity() / 1024}KB copyMs=$copyMs")
+
+        analysisExecutor.execute {
+            val shouldCapture = processor.processFrame(
+                buf         = direct,
+                w           = w,
+                h           = h,
+                stride      = stride,
+                rotation    = rotation,
+                timestampNs = ts,
+                captureResult = result,
+            )
+            if (shouldCapture > 0.5f) {
+                captureStitchFrame { error ->
+                    if (error != null) Log.e(TAG, "Auto-stitch capture failed", error)
+                }
+            }
         }
     }
 
@@ -957,6 +1036,11 @@ class CameraManager(
                 CaptureRequest.SHADING_MODE,
                 CameraMetadata.SHADING_MODE_FAST,
             )
+
+        // Center crop via SCALER_CROP_REGION — restricts all use cases to the same 1600×1200 window.
+        sensorCropRect?.let { crop ->
+            builder.setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION, crop)
+        }
 
         val future = camera2Control.setCaptureRequestOptions(builder.build())
         future.addListener(
