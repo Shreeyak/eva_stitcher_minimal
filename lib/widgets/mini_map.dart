@@ -1,18 +1,27 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 /// Small thumbnail map shown in the top-right corner.
-/// Shows a downscaled view of the stitched canvas (mock grid for now)
-/// with a viewport rectangle representing the current camera view.
+/// Shows a downscaled view of the stitched canvas with a rectangle tracking
+/// the current frame position in the canvas coordinate space.
 class MiniMap extends StatelessWidget {
   final int frameCount;
 
-  // Viewport rect as a fraction of the total canvas [0..1]
+  /// JPEG bytes of the canvas preview rendered by the stitching engine.
+  /// When null the minimap shows a plain background.
+  final Uint8List? previewBytes;
+
+  /// Current frame rect as a fraction of the total canvas [0..1].
+  /// [Rect.zero] (width == 0 && height == 0) means no frame tracked yet;
+  /// the rectangle is not drawn in that case.
   final Rect viewportFraction;
 
   const MiniMap({
     super.key,
     this.frameCount = 0,
-    this.viewportFraction = const Rect.fromLTWH(0.3, 0.3, 0.4, 0.4),
+    this.previewBytes,
+    this.viewportFraction = Rect.zero,
   });
 
   static const double _kWidth = 190.0;
@@ -33,12 +42,18 @@ class MiniMap extends StatelessWidget {
         borderRadius: BorderRadius.circular(3),
         child: Stack(
           children: [
-            // Downsampled stitched image background (empty until frames are stitched)
+            // Canvas preview image (empty background until first frame is stitched)
             Positioned.fill(
-              child: ColoredBox(
-                color: cs.surfaceContainer,
-                child: const SizedBox.expand(),
-              ),
+              child: previewBytes != null
+                  ? Image.memory(
+                      previewBytes!,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                    )
+                  : ColoredBox(
+                      color: cs.surfaceContainer,
+                      child: const SizedBox.expand(),
+                    ),
             ),
 
             // Viewport rect overlay
@@ -106,6 +121,9 @@ class _ViewportPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Nothing to draw when no frame has been tracked yet.
+    if (viewportFraction.isEmpty) return;
+
     // Viewport rect
     final vpRect = Rect.fromLTWH(
       viewportFraction.left * size.width,
