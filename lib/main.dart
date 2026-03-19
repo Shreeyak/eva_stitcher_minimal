@@ -8,12 +8,16 @@ import 'theme/material_theme_salmon.dart';
 import 'theme/theme_util.dart';
 import 'package:eva_camera/eva_camera.dart';
 import 'camera/camera_callbacks.dart';
-import 'widgets/bottom_info_bar.dart';
+import 'widgets/info_bar.dart';
 import 'widgets/interactive_bottom_bar.dart';
+import 'widgets/velocity_bar.dart';
+import 'widgets/quality_bar.dart';
 import 'widgets/canvas_view.dart';
 import 'widgets/camera_control_overlay.dart';
 import 'widgets/mini_map.dart';
 import 'widgets/bottom_bar_buttons.dart';
+import 'widgets/stitch_debug_overlay.dart';
+import 'stitcher/stitch_state.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -75,6 +79,7 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isScanning = false;
   bool _showCanvas = false;
   bool _settingsDrawerOpen = false;
+  bool _showDebugOverlay = false;
 
   /// Last WB-lock value that was *confirmed* by native (before any pending
   /// optimistic flip). Used to revert the UI if the native call fails.
@@ -87,8 +92,19 @@ class _CameraScreenState extends State<CameraScreen> {
 
   // ── Session timer ─────────────────────────────────────────────────
   int _sessionSeconds = 0;
-  int _stitchedCount = 0;
   Timer? _sessionTimer;
+
+  // ── Stitch / navigation state ─────────────────────────────────────
+  NavigationState _navState = NavigationState.empty;
+  int _prevFramesCaptured = 0;
+  Timer? _navPollTimer;
+  Uint8List? _canvasPreviewBytes;
+  int _navPollTicks = 0;
+
+  // ── Capture flash ──────────────────────────────────────────────────
+  bool _captureFlash = false;
+  Timer? _flashTimer;
+  String? _navPollError;
 
   @override
   void initState() {
@@ -163,7 +179,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _startCamera() async {
     try {
-      final info = await CameraControl.startCamera();
+      final info = await CameraControl.startCamera(
+        analysisWidth: 1600,
+        analysisHeight: 1200,
+      );
       if (!mounted) return;
 
       final cw = info.captureWidth?.toString() ?? '--';
@@ -178,6 +197,11 @@ class _CameraScreenState extends State<CameraScreen> {
           analysisResolution: '${aw}x$ah',
         );
       });
+
+      // Initialize the native stitching engine with the actual resolution.
+      final int analysisW = info.analysisWidth ?? 1600;
+      final int analysisH = info.analysisHeight ?? 1200;
+      await StitchControl.initEngine(analysisW: analysisW, analysisH: analysisH);
 
       final ranges = CameraRanges(
         minFocusDistance: info.minFocusDistance,
@@ -210,6 +234,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
       if (!mounted) return;
       _listenToEvents();
+      _startNavPoll();
     } catch (e) {
       if (!mounted) return;
       _showError('Camera error: $e');
@@ -225,10 +250,54 @@ class _CameraScreenState extends State<CameraScreen> {
     }, onError: (e) => debugPrint('Event stream error: $e'));
   }
 
+  void _startNavPoll() {
+    _navPollTimer?.cancel();
+    _navPollTimer = Timer.periodic(const Duration(milliseconds: 50), (_) async {
+      if (!mounted) return;
+      try {
+        final state = await StitchControl.getNavigationState();
+        if (!mounted || state == null) return;
+        final bool newFrame = state.framesCaptured > _prevFramesCaptured;
+        if (newFrame) {
+          _prevFramesCaptured = state.framesCaptured;
+          _fetchCanvasPreview();
+          _triggerCaptureFlash();
+        }
+        setState(() {
+          _navState = state;
+          _navPollTicks++;
+          _navPollError = null;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _navPollTicks++;
+          _navPollError = e.toString();
+        });
+      }
+    });
+  }
+
+  Future<void> _fetchCanvasPreview() async {
+    final bytes = await StitchControl.getCanvasPreview();
+    if (!mounted || bytes == null) return;
+    setState(() => _canvasPreviewBytes = bytes);
+  }
+
+  void _triggerCaptureFlash() {
+    _flashTimer?.cancel();
+    setState(() => _captureFlash = true);
+    _flashTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() => _captureFlash = false);
+    });
+  }
+
   @override
   void dispose() {
     _eventSub?.cancel();
     _sessionTimer?.cancel();
+    _navPollTimer?.cancel();
+    _flashTimer?.cancel();
     _afFocusSyncTimer?.cancel();
     _settingsQueue.cancel();
     CameraControl.stopCamera();
@@ -439,11 +508,13 @@ class _CameraScreenState extends State<CameraScreen> {
   void _toggleScan() {
     setState(() => _isScanning = !_isScanning);
     if (_isScanning) {
+      StitchControl.startScanning();
       _sessionTimer?.cancel();
       _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() => _sessionSeconds++);
       });
     } else {
+      StitchControl.stopScanning();
       _sessionTimer?.cancel();
     }
   }
@@ -451,16 +522,39 @@ class _CameraScreenState extends State<CameraScreen> {
   void _onReset() {
     setState(() {
       _isScanning = false;
-      _stitchedCount = 0;
+      _navState = NavigationState.empty;
+      _canvasPreviewBytes = null;
+      _prevFramesCaptured = 0;
       _sessionSeconds = 0;
     });
     _sessionTimer?.cancel();
+    StitchControl.stopScanning();
+    StitchControl.resetEngine();
   }
 
-  void _onExport() {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Export not yet implemented')));
+  void _onSaveCanvas() async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saving canvas to Pictures/EvaWSI...')),
+      );
+      final result = await StitchControl.saveCanvasToDisk();
+      if (mounted) {
+        final path = result?['path'] as String?;
+        final saved = result != null && result['success'] == true;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(saved ? 'Canvas saved to $path' : 'Save failed'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving canvas: $e')),
+        );
+      }
+    }
   }
 
   // ── Build ─────────────────────────────────────────────────────────
@@ -486,7 +580,7 @@ class _CameraScreenState extends State<CameraScreen> {
           child: Stack(
             children: [
               // Canvas — always the base layer (scrollable infinite plane)
-              const Positioned.fill(child: CanvasView()),
+              Positioned.fill(child: CanvasView(previewBytes: _canvasPreviewBytes)),
 
               // Camera preview window — centered, 60 % of screen width.
               // Keep in tree with Visibility to maintain camera stream persistence.
@@ -508,26 +602,67 @@ class _CameraScreenState extends State<CameraScreen> {
                       child: Center(
                         child: FractionallySizedBox(
                           widthFactor: 0.6,
-                          child: AspectRatio(
-                            aspectRatio: 4 / 3,
-                            child: GestureDetector(
-                              onTap: _cameraStarted
-                                  ? () => _setWbLocked(true)
-                                  : null,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: cs.primary.withValues(alpha: 0.8),
-                                    width: 2,
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: _buildCameraPreview(),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Camera preview with velocity bar overlaid to the left
+                              AspectRatio(
+                                aspectRatio: 4 / 3,
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    // Preview fills the stack
+                                    GestureDetector(
+                                      onTap: _cameraStarted
+                                          ? () => _setWbLocked(true)
+                                          : null,
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 150),
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: _captureFlash
+                                                ? cs.primary
+                                                : cs.primary.withValues(alpha: 0.5),
+                                            width: _captureFlash ? 3 : 2,
+                                          ),
+                                          borderRadius: BorderRadius.circular(8),
+                                          boxShadow: _captureFlash
+                                              ? [
+                                                  BoxShadow(
+                                                    color: cs.primary.withValues(alpha: 0.5),
+                                                    blurRadius: 8,
+                                                    spreadRadius: 2,
+                                                  ),
+                                                ]
+                                              : null,
+                                        ),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: _buildCameraPreview(),
+                                        ),
+                                      ),
+                                    ),
+                                    // Velocity bar — positioned outside preview, left edge
+                                    Positioned(
+                                      left: -14,
+                                      top: 0,
+                                      bottom: 0,
+                                      width: 8,
+                                      child: VelocityBar(speed: _navState.speed),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ),
+                              const SizedBox(height: 4),
+                              // Quality bar — full width, below preview
+                              SizedBox(
+                                height: 4,
+                                child: QualityBar(
+                                  quality: _navState.quality,
+                                  trackingState: _navState.trackingState,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -556,12 +691,11 @@ class _CameraScreenState extends State<CameraScreen> {
                 top: 0,
                 left: 0,
                 right: 0,
-                child: BottomInfoBar(
+                child: InfoBar(
                   isScanning: _isScanning,
                   frameCount: _info.frameCount,
-                  stitchedCount: _stitchedCount,
-                  totalTarget: 0,
-                  coveragePct: 0.0,
+                  stitchedCount: _navState.framesCaptured,
+                  lastConfidence: _navState.lastConfidence,
                   sessionSeconds: _sessionSeconds,
                 ),
               ),
@@ -580,6 +714,18 @@ class _CameraScreenState extends State<CameraScreen> {
                   ),
                 ),
               ),
+
+              // Debug overlay — below MiniMap, hidden when not active or in canvas mode
+              if (_showDebugOverlay && !_showCanvas)
+                Positioned(
+                  top: 44 + 130 + 6, // MiniMap top + MiniMap height + gap
+                  right: 8,
+                  child: StitchDebugOverlay(
+                    navState: _navState,
+                    pollTicks: _navPollTicks,
+                    pollError: _navPollError,
+                  ),
+                ),
 
               // All bottom controls pinned to the bottom of the screen
               Positioned(
@@ -635,22 +781,25 @@ class _CameraScreenState extends State<CameraScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (_cameraStarted)
-                            InteractiveBottomBar(
+                          InteractiveBottomBar(
+                              cameraReady: _cameraStarted,
                               isScanning: _isScanning,
                               showCanvas: _showCanvas,
                               isSettingsOpen: _settingsDrawerOpen,
+                              showDebugOverlay: _showDebugOverlay,
                               onToggleScan: _toggleScan,
                               onToggleCanvas: () =>
                                   setState(() => _showCanvas = !_showCanvas),
                               onToggleSettings: _toggleSettingsDrawer,
+                              onToggleDebugOverlay: () =>
+                                  setState(() => _showDebugOverlay = !_showDebugOverlay),
                               onReset: _onReset,
-                              onExport: _onExport,
+                              onSaveCanvas: _onSaveCanvas,
                               activeSetting: _activeSetting,
                               onSettingChipTap: _onSettingChipTap,
                               values: _values,
                               callbacks: _callbacks,
-                              canExport: false,
+                              canExport: _navState.framesCaptured > 0,
                             ),
                         ],
                       ),

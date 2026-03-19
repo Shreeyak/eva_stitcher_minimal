@@ -33,15 +33,11 @@ class MiniMap extends StatelessWidget {
         borderRadius: BorderRadius.circular(3),
         child: Stack(
           children: [
-            // Downsampled stitched image background
+            // Downsampled stitched image background (empty until frames are stitched)
             Positioned.fill(
-              child: Image.asset(
-                'assets/r04_c04.png',
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => ColoredBox(
-                  color: cs.surfaceContainer,
-                  child: const SizedBox.expand(),
-                ),
+              child: ColoredBox(
+                color: cs.surfaceContainer,
+                child: const SizedBox.expand(),
               ),
             ),
 

@@ -8,10 +8,13 @@ import 'camera_settings_bar.dart';
 /// The bottom interactive area that hosts both the Main Action Bar
 /// and the Camera Settings Bar, animating between them.
 class InteractiveBottomBar extends StatelessWidget {
+  final bool cameraReady;
   final bool isScanning;
   final bool showCanvas;
   final bool isSettingsOpen;
   final bool canExport;
+  final bool showDebugOverlay;
+  final VoidCallback onToggleDebugOverlay;
 
   // Settings bar specifics
   final CameraSettingType? activeSetting;
@@ -23,15 +26,18 @@ class InteractiveBottomBar extends StatelessWidget {
   final VoidCallback onToggleCanvas;
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
-  final VoidCallback onExport;
+  final VoidCallback onSaveCanvas;
   final ValueChanged<CameraSettingType?> onSettingChipTap;
 
   const InteractiveBottomBar({
     super.key,
+    required this.cameraReady,
     required this.isScanning,
     required this.showCanvas,
     required this.isSettingsOpen,
     required this.canExport,
+    required this.showDebugOverlay,
+    required this.onToggleDebugOverlay,
     required this.activeSetting,
     required this.values,
     required this.callbacks,
@@ -39,7 +45,7 @@ class InteractiveBottomBar extends StatelessWidget {
     required this.onToggleCanvas,
     required this.onToggleSettings,
     required this.onReset,
-    required this.onExport,
+    required this.onSaveCanvas,
     required this.onSettingChipTap,
   });
 
@@ -61,14 +67,17 @@ class InteractiveBottomBar extends StatelessWidget {
                 child: FractionalTranslation(
                   translation: Offset(0, t),
                   child: _MainActionBar(
+                    cameraReady: cameraReady,
                     isScanning: isScanning,
                     showCanvas: showCanvas,
                     canExport: canExport,
+                    showDebugOverlay: showDebugOverlay,
                     onToggleScan: onToggleScan,
                     onToggleCanvas: onToggleCanvas,
                     onToggleSettings: onToggleSettings,
                     onReset: onReset,
-                    onExport: onExport,
+                    onSaveCanvas: onSaveCanvas,
+                    onToggleDebugOverlay: onToggleDebugOverlay,
                   ),
                 ),
               ),
@@ -99,24 +108,30 @@ class InteractiveBottomBar extends StatelessWidget {
 }
 
 class _MainActionBar extends StatelessWidget {
+  final bool cameraReady;
   final bool isScanning;
   final bool showCanvas;
   final bool canExport;
+  final bool showDebugOverlay;
   final VoidCallback onToggleScan;
   final VoidCallback onToggleCanvas;
   final VoidCallback onToggleSettings;
   final VoidCallback onReset;
-  final VoidCallback onExport;
+  final VoidCallback onSaveCanvas;
+  final VoidCallback onToggleDebugOverlay;
 
   const _MainActionBar({
+    required this.cameraReady,
     required this.isScanning,
     required this.showCanvas,
     required this.canExport,
+    required this.showDebugOverlay,
     required this.onToggleScan,
     required this.onToggleCanvas,
     required this.onToggleSettings,
     required this.onReset,
-    required this.onExport,
+    required this.onSaveCanvas,
+    required this.onToggleDebugOverlay,
   });
 
   @override
@@ -154,12 +169,19 @@ class _MainActionBar extends StatelessWidget {
             onTap: onReset,
           ),
           const SizedBox(width: 32),
-          BottomBarActionButton(
-            icon: Icons.download_outlined,
-            label: 'EXPORT',
-            isDisabled: !canExport,
-            onTap: canExport ? onExport : null,
-          ),
+           BottomBarActionButton(
+             icon: Icons.save_outlined,
+             label: 'SAVE CANVAS',
+             isDisabled: !canExport,
+             onTap: canExport ? onSaveCanvas : null,
+           ),
+           const SizedBox(width: 32),
+           BottomBarActionButton(
+             icon: Icons.bug_report_outlined,
+             label: 'DEBUG',
+             isActive: showDebugOverlay,
+             onTap: onToggleDebugOverlay,
+           ),
 
           const Spacer(),
 
@@ -168,18 +190,26 @@ class _MainActionBar extends StatelessWidget {
             height: 38,
             child: FloatingActionButton.extended(
               elevation: 0,
-              onPressed: onToggleScan,
-              backgroundColor: isScanning ? cs.tertiary : cs.primaryContainer,
-              foregroundColor: isScanning
-                  ? cs.onTertiary
-                  : cs.onPrimaryContainer,
+              onPressed: cameraReady ? onToggleScan : null,
+              backgroundColor: !cameraReady
+                  ? cs.surfaceContainerHighest
+                  : isScanning
+                      ? cs.tertiary
+                      : cs.primaryContainer,
+              foregroundColor: !cameraReady
+                  ? cs.onSurfaceVariant
+                  : isScanning
+                      ? cs.onTertiary
+                      : cs.onPrimaryContainer,
               icon: Icon(
                 isScanning
                     ? Icons.stop_circle_outlined
                     : Icons.play_circle_outline,
               ),
               label: Text(
-                isScanning ? 'STOP' : 'START',
+                cameraReady
+                    ? (isScanning ? 'STOP' : 'START')
+                    : 'NO CAMERA',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1,
