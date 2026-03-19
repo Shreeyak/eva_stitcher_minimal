@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-19 (update 22)
+
+### Fix: `_captureInProgress` guard was dead code — set it when gate fires, clear on commit
+
+- `Navigation::processFrame` now sets `_captureInProgress = true` immediately when the gate fires, preventing the bootstrap path (and all subsequent gates) from triggering another capture while the stitch frame is in-flight.
+- `Navigation::onFrameCommitted` now clears `_captureInProgress` (alongside the existing `_framesCaptured++`), so normal gating resumes only after each committed frame is acknowledged.
+
 ## 2026-03-18 (update 21)
 
 ### Fix: first frame never committed — skip velocity gate for bootstrap anchor
