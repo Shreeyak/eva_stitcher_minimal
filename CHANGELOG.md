@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-19 (update 23)
+
+### Feature: MiniMap now shows live canvas preview and frame-position tracker
+
+- `MiniMap` accepts `previewBytes` (JPEG from `StitchControl.getCanvasPreview`) and renders it as the minimap background; falls back to a plain surface when empty.
+- Current frame position is computed in `_computeFrameFraction()` from `NavigationState` (pose + canvas bounds + fixed 1600×1200 frame size) and passed as `viewportFraction`; the rectangle is hidden until the first frame is committed.
+
 ## 2026-03-19 (update 22)
 
 ### Fix: `_captureInProgress` guard was dead code — set it when gate fires, clear on commit

@@ -505,6 +505,30 @@ class _CameraScreenState extends State<CameraScreen> {
 
   // ── Scan / session ────────────────────────────────────────────────
 
+  /// Maps the current frame pose to a fraction of the total canvas bounds
+  /// so the MiniMap can draw the position rectangle.
+  ///
+  /// Frame size in canvas coordinates is fixed at 1600×1200 (CANVAS_FRAME_W/H
+  /// in native/stitcher/types.h).  Returns [Rect.zero] when canvas is empty.
+  Rect _computeFrameFraction() {
+    final nav = _navState;
+    if (!nav.canvasHasData) return Rect.zero;
+
+    final canvasW = nav.canvasMaxX - nav.canvasMinX;
+    final canvasH = nav.canvasMaxY - nav.canvasMinY;
+    if (canvasW <= 0 || canvasH <= 0) return Rect.zero;
+
+    const frameW = 1600.0; // CANVAS_FRAME_W
+    const frameH = 1200.0; // CANVAS_FRAME_H
+
+    final left = ((nav.poseX - nav.canvasMinX) / canvasW).clamp(0.0, 1.0);
+    final top  = ((nav.poseY - nav.canvasMinY) / canvasH).clamp(0.0, 1.0);
+    final normalizedWidth  = (frameW / canvasW).clamp(0.0, 1.0 - left);
+    final normalizedHeight = (frameH / canvasH).clamp(0.0, 1.0 - top);
+
+    return Rect.fromLTWH(left, top, normalizedWidth, normalizedHeight);
+  }
+
   void _toggleScan() {
     setState(() => _isScanning = !_isScanning);
     if (_isScanning) {
@@ -710,7 +734,11 @@ class _CameraScreenState extends State<CameraScreen> {
                   curve: Curves.easeInOut,
                   child: IgnorePointer(
                     ignoring: _showCanvas,
-                    child: MiniMap(frameCount: _info.frameCount),
+                    child: MiniMap(
+                      frameCount: _info.frameCount,
+                      previewBytes: _canvasPreviewBytes,
+                      viewportFraction: _computeFrameFraction(),
+                    ),
                   ),
                 ),
               ),
