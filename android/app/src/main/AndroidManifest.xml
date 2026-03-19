@@ -29,6 +29,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Test activity for GPU→CPU camera frame readback -->
+        <activity
+            android:name=".CameraReadbackTestActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:hardwareAccelerated="true" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
