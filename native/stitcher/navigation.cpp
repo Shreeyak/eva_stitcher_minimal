@@ -106,8 +106,9 @@ bool Navigation::processFrame(const cv::Mat& navFrame, int64_t timestampNs,
         LOGI("captureGated TRIGGER quality=%.2f conf=%.3f sharp=%.3f overlap=%.3f speed=%.1f dist=%.1f/%d frames=%d",
              _quality, _lastConfidence, _sharpness, _overlapRatio,
              _speed, dist, MIN_CAPTURE_DISTANCE, _framesCaptured);
-        _lastCaptureTimeNs = timestampNs;
-        _lastCapturePose   = _pose;
+        _lastCaptureTimeNs  = timestampNs;
+        _lastCapturePose    = _pose;
+        _captureInProgress  = true;
         return true;
     }
 
@@ -125,6 +126,7 @@ bool Navigation::processFrame(const cv::Mat& navFrame, int64_t timestampNs,
 
 void Navigation::onFrameCommitted() {
     ++_framesCaptured;
+    _captureInProgress = false;
 }
 
 // ── State accessors ────────────────────────────────────────────────────────
