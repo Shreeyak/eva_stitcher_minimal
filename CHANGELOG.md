@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-19 (update 23)
+
+### Implement GitHub issue #12: GPU→CPU camera frame readback methods
+
+- Added two alternative methods for capturing full-resolution preview frames (4000×3000) on CPU for ML inference, replacing ImageAnalysis path.
+- **Method 1 (TextureViewBitmapCapture)**: Synchronous `getBitmap()` readback via PreviewView COMPATIBLE mode. Simple integration, 30-120ms GPU stall per frame, caps at ~6fps.
+- **Method 2 (GpuToCpuSurfaceProvider)**: Custom OpenGL ES 3.0 pipeline with double-buffered PBOs. Zero GPU stall in steady state, asynchronous readback, one frame of latency.
+- Created `CameraReadbackTestActivity` with compile-time toggle (`USE_GL_METHOD`) to demonstrate both methods.
+- Added GLES 3.0 feature declaration to `AndroidManifest.xml` and required CameraX dependencies (`camera-lifecycle`, `camera-view`, `appcompat`).
+
 ## 2026-03-19 (update 22)
 
 ### Fix: `_captureInProgress` guard was dead code — set it when gate fires, clear on commit
