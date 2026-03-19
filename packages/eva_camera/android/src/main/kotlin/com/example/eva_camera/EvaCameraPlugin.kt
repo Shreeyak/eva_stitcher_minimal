@@ -66,7 +66,8 @@ class EvaCameraPlugin :
         binding.platformViewRegistry.registerViewFactory(
             CAMERA_VIEW_TYPE,
             CameraPreviewFactory(
-                onViewCreated = { pv -> cameraManager?.setPreviewView(pv) },
+                onPreviewViewCreated = { pv -> cameraManager?.setPreviewView(pv) },
+                onSurfaceViewCreated = { sv -> cameraManager?.setSurfaceView(sv) },
                 onViewDisposed = { cameraManager?.onPreviewDisposed() },
             ),
         )

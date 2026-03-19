@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-19
+
+- Added GPU→CPU camera frame readback via `TextureViewBitmapCapture` (Method 1: `getBitmap()`) and `GpuToCpuSurfaceProvider` (Method 2: GL EGL pipeline + double-buffered PBOs).
+- Replaced `ImageAnalysis` use case with preview-based readback; camera now binds Preview + ImageCapture only.
+- Added `USE_GL_METHOD` compile-time toggle (default `false`) in `CameraManager`; `CameraPreviewView` conditionally creates `SurfaceView` (GL) or `PreviewView` COMPATIBLE (bitmap) based on this flag.
+
 ## 2026-03-14
 
 - Extracted camera stack into reusable Flutter plugin at `packages/eva_camera/` (Dart + Kotlin/CameraX).

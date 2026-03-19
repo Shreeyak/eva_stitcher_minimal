@@ -15,6 +15,7 @@ import android.util.Log
 import android.util.Range
 import android.util.Size
 import android.view.Surface
+import SurfaceView
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -23,7 +24,6 @@ import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
@@ -40,9 +40,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Manages all CameraX operations: preview, capture, analysis, and Camera2 interop. Analysis frames
- * stay native-side (no streaming to Dart). Frames are forwarded to a [FrameProcessor] if one is
- * registered.
+ * Manages all CameraX operations: preview, capture, and Camera2 interop.
+ *
+ * Frame readback method is controlled by [USE_GL_METHOD]:
+ *   - false → Method 1: TextureView.getBitmap() via [TextureViewBitmapCapture]
+ *   - true  → Method 2: GL EGL pipeline with double-buffered PBOs via [GpuToCpuSurfaceProvider]
  */
 class CameraManager(
     private val context: Context,
@@ -50,6 +52,13 @@ class CameraManager(
 ) {
     companion object {
         private const val TAG = "EvaCamera"
+
+        /**
+         * Compile-time toggle for the GPU→CPU readback method.
+         *   false → Method 1: TextureViewBitmapCapture (PreviewView COMPATIBLE mode)
+         *   true  → Method 2: GpuToCpuSurfaceProvider (custom GL EGL pipeline)
+         */
+        const val USE_GL_METHOD: Boolean = false
 
         /** Identity color correction transform — fallback for manual WB. */
         private val IDENTITY_COLOR_TRANSFORM =
@@ -70,9 +79,12 @@ class CameraManager(
     // ── Camera state ────────────────────────────────────────────────────
     private var camera: Camera? = null
     private var imageCapture: ImageCapture? = null
-    private var imageAnalysis: ImageAnalysis? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraExecutor: ExecutorService? = null
+
+    // ── Frame readback (Method 1 or Method 2) ───────────────────────────
+    private var bitmapCapture: TextureViewBitmapCapture? = null
+    private var glSurfaceProvider: GpuToCpuSurfaceProvider? = null
 
     // ── Camera controls state ───────────────────────────────────────────
     private var afEnabled: Boolean = true
@@ -113,6 +125,7 @@ class CameraManager(
 
     // ── Preview ─────────────────────────────────────────────────────────
     private var previewView: PreviewView? = null
+    private var surfaceView: SurfaceView? = null
     private var pendingStartCallback: ((Map<String, Any>?, Exception?) -> Unit)? = null
 
     // ── Event streaming to Dart ─────────────────────────────────────────
@@ -135,6 +148,10 @@ class CameraManager(
 
     /** Set the PreviewView whose surface provider will receive the camera feed. */
     fun setPreviewView(view: PreviewView) {
+        if (!USE_GL_METHOD) {
+            // Method 1 requires COMPATIBLE mode so PreviewView uses a TextureView internally
+            view.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
         previewView = view
         Log.i(TAG, "PreviewView set")
         pendingStartCallback?.let { callback ->
@@ -148,7 +165,23 @@ class CameraManager(
     fun onPreviewDisposed() {
         Log.i(TAG, "PreviewView disposed")
         previewView = null
+        surfaceView = null
         stopCamera()
+    }
+
+    /**
+     * Set the SurfaceView used for display when [USE_GL_METHOD] = true.
+     * Called from [CameraPreviewView] once the surface is ready (in surfaceCreated).
+     * Triggers a deferred [startCamera] if one is pending.
+     */
+    fun setSurfaceView(view: SurfaceView) {
+        surfaceView = view
+        Log.i(TAG, "SurfaceView set (${view.width}x${view.height})")
+        pendingStartCallback?.let { callback ->
+            pendingStartCallback = null
+            Log.i(TAG, "Executing deferred startCamera (GL method)")
+            startCameraWithSurfaceView(view, callback)
+        }
     }
 
     /** Set the EventChannel sink for status/diagnostic events. */
@@ -159,7 +192,7 @@ class CameraManager(
     // ── Camera lifecycle ────────────────────────────────────────────────
 
     /**
-     * Start the camera with Preview, ImageCapture, and ImageAnalysis use cases. Returns resolution
+     * Start the camera with Preview and ImageCapture use cases. Returns resolution
      * info via callback on the main thread.
      */
     @OptIn(ExperimentalCamera2Interop::class)
@@ -183,6 +216,17 @@ class CameraManager(
         }
 
         val pv = previewView
+        if (USE_GL_METHOD) {
+            val sv = surfaceView
+            if (sv == null) {
+                Log.i(TAG, "SurfaceView not ready, deferring startCamera (GL method)")
+                pendingStartCallback = callback
+                return
+            }
+            startCameraWithSurfaceView(sv, callback)
+            return
+        }
+
         if (pv == null) {
             Log.i(TAG, "PreviewView not ready, deferring startCamera")
             pendingStartCallback = callback
@@ -221,8 +265,37 @@ class CameraManager(
         )
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun startCameraWithSurfaceView(
+        sv: SurfaceView,
+        callback: (Map<String, Any>?, Exception?) -> Unit,
+    ) {
+        defaultAeTargetFpsRange = null
+        availableAeTargetFpsRanges = emptyArray()
+        aeTargetFpsRange = null
+
+        if (cameraExecutor == null || cameraExecutor!!.isShutdown) {
+            cameraExecutor = Executors.newSingleThreadExecutor()
+        }
+
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener(
+            {
+                try {
+                    val provider = cameraProviderFuture.get()
+                    this.cameraProvider = provider
+                    rebindUseCasesWithSurfaceView(sv, provider, includeCapabilitiesInResult = true, callback = callback)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Camera start (GL) failed", e)
+                    callback(null, e)
+                }
+            },
+            ContextCompat.getMainExecutor(context),
+        )
+    }
+
     /**
-     * Build and bind all use cases (Preview, ImageCapture, ImageAnalysis) to the camera.
+     * Build and bind all use cases (Preview, ImageCapture) to the camera.
      * Called from [startCamera] and [setCaptureFormat] to apply format/resolution changes.
      */
     @OptIn(ExperimentalCamera2Interop::class)
@@ -245,24 +318,8 @@ class CameraManager(
                         ),
                     ).build()
 
-            val analysisResolution =
-                ResolutionSelector
-                    .Builder()
-                    .setResolutionStrategy(
-                        ResolutionStrategy(
-                            preferredAnalysisSize,
-                            ResolutionStrategy
-                                .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
-                        ),
-                    ).build()
-
             // ── Preview ──
-            val preview =
-                Preview
-                    .Builder()
-                    .setTargetRotation(Surface.ROTATION_0)
-                    .build()
-                    .also { it.setSurfaceProvider(pv.surfaceProvider) }
+            val preview = Preview.Builder().setTargetRotation(Surface.ROTATION_0).build()
 
             // ── ImageCapture (ZSL, output format from captureFormatYuv state) ──
             val captureBuilder =
@@ -275,22 +332,11 @@ class CameraManager(
             if (captureFormatYuv) {
                 captureBuilder.setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
             }
-            imageCapture = captureBuilder.build()
 
-            // ── ImageAnalysis (YUV_420_888 for future C++ BGR conversion) ──
-            val analysisBuilder =
-                ImageAnalysis
-                    .Builder()
-                    .setResolutionSelector(analysisResolution)
-                    .setOutputImageFormat(
-                        ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888,
-                    ).setBackpressureStrategy(
-                        ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST,
-                    ).setTargetRotation(Surface.ROTATION_0)
-
-            // Attach Camera2 capture callback to snoop live AWB/AF values
+            // Attach Camera2 capture callback to snoop live AWB/AF values.
+            // Moved from ImageAnalysis to ImageCapture since ImageAnalysis is no longer used.
             Camera2Interop
-                .Extender(analysisBuilder)
+                .Extender(captureBuilder)
                 .setSessionCaptureCallback(
                     object : CameraCaptureSession.CaptureCallback() {
                         override fun onCaptureCompleted(
@@ -339,24 +385,24 @@ class CameraManager(
                     },
                 )
 
-            imageAnalysis =
-                analysisBuilder.build().also { analysis ->
-                    analysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
-                        processFrame(imageProxy)
-                    }
-                }
+            imageCapture = captureBuilder.build()
 
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             stopFpsTimer()
+            bitmapCapture?.stop()
+            bitmapCapture = null
             provider.unbindAll()
+
+            // Method 1: PreviewView in COMPATIBLE mode exposes TextureView for getBitmap()
+            preview.setSurfaceProvider(pv.surfaceProvider)
+
             val cam =
                 provider.bindToLifecycle(
                     lifecycleOwner,
                     cameraSelector,
                     preview,
                     imageCapture!!,
-                    imageAnalysis!!,
                 )
             this.camera = cam
 
@@ -389,6 +435,38 @@ class CameraManager(
             // Start FPS reporting timer
             startFpsTimer()
 
+            // Method 1: start periodic getBitmap() readback after camera is bound
+            if (!USE_GL_METHOD) {
+                bitmapCapture =
+                    TextureViewBitmapCapture(
+                        previewView = pv,
+                        captureWidth = preferredCaptureSize.width,
+                        captureHeight = preferredCaptureSize.height,
+                        targetFps = 3f,
+                        callback =
+                            object : TextureViewBitmapCapture.FrameCallback {
+                                override fun onFrameReady(
+                                    bitmap: android.graphics.Bitmap,
+                                    profile: TextureViewBitmapCapture.BitmapFrameProfile,
+                                ) {
+                                    frameCount++
+                                    Log.d(TAG, profile.summary())
+                                    pushEvent(
+                                        "status",
+                                        "bitmapProfile",
+                                        profile.summary(),
+                                        mapOf(
+                                            "frameCount" to frameCount,
+                                            "fps" to profile.achievedFps.toDouble(),
+                                            "profileSummary" to profile.summary(),
+                                        ),
+                                    )
+                                    runMlInference(bitmap, bitmap.width, bitmap.height)
+                                }
+                            },
+                    )
+            }
+
             applyAllCaptureOptions(cam) { error ->
                 if (error != null) {
                     Log.e(TAG, "Initial capture options apply failed", error)
@@ -404,15 +482,167 @@ class CameraManager(
         }
     }
 
+    /**
+     * Bind use cases for Method 2 (GpuToCpuSurfaceProvider). Uses the SurfaceView's surface as
+     * the display target and sets [GpuToCpuSurfaceProvider] as the CameraX surface provider.
+     */
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun rebindUseCasesWithSurfaceView(
+        sv: SurfaceView,
+        provider: ProcessCameraProvider,
+        includeCapabilitiesInResult: Boolean = false,
+        callback: (Map<String, Any>?, Exception?) -> Unit,
+    ) {
+        try {
+            val captureResolution =
+                ResolutionSelector
+                    .Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(preferredCaptureSize, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
+                    ).build()
+
+            val preview = Preview.Builder().setTargetRotation(android.view.Surface.ROTATION_0).build()
+
+            val captureBuilder =
+                ImageCapture
+                    .Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
+                    .setResolutionSelector(captureResolution)
+                    .setTargetRotation(android.view.Surface.ROTATION_0)
+            if (captureFormatYuv) {
+                captureBuilder.setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
+            }
+
+            Camera2Interop
+                .Extender(captureBuilder)
+                .setSessionCaptureCallback(
+                    object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            result: TotalCaptureResult,
+                        ) {
+                            val awbMode = result.get(CaptureResult.CONTROL_AWB_MODE)
+                            if (awbMode == CameraMetadata.CONTROL_AWB_MODE_AUTO) {
+                                result.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { capturedColorTransform = it }
+                                result.get(CaptureResult.COLOR_CORRECTION_GAINS)?.let { capturedColorGains = it }
+                            }
+                            if (afEnabled) {
+                                result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let { capturedFocusDistance = it }
+                            }
+                            if (defaultAeTargetFpsRange == null) {
+                                result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)?.let {
+                                    defaultAeTargetFpsRange = it
+                                    Log.i(TAG, "Default AE FPS from first capture result: [${it.lower}, ${it.upper}]")
+                                }
+                            }
+                            latestCaptureResult = result
+                        }
+                    },
+                )
+
+            imageCapture = captureBuilder.build()
+
+            val displayWidth = sv.width.takeIf { it > 0 } ?: preferredCaptureSize.width
+            val displayHeight = sv.height.takeIf { it > 0 } ?: preferredCaptureSize.height
+
+            val glProvider =
+                GpuToCpuSurfaceProvider(
+                    displaySurface = sv.holder.surface,
+                    displayWidth = displayWidth,
+                    displayHeight = displayHeight,
+                    cameraWidth = preferredCaptureSize.width,
+                    cameraHeight = preferredCaptureSize.height,
+                    targetReadbackFps = 3f,
+                    callback =
+                        object : GpuToCpuSurfaceProvider.FrameCallback {
+                            override fun onFrameReady(
+                                buffer: java.nio.ByteBuffer,
+                                profile: GpuToCpuSurfaceProvider.GlFrameProfile,
+                            ) {
+                                frameCount++
+                                Log.d(TAG, profile.summary())
+                                if (profile.callbackMs > 100f) {
+                                    val copy = java.nio.ByteBuffer.allocate(buffer.remaining())
+                                    copy.put(buffer)
+                                    copy.rewind()
+                                    runMlInference(copy, preferredCaptureSize.width, preferredCaptureSize.height)
+                                } else {
+                                    runMlInference(buffer, preferredCaptureSize.width, preferredCaptureSize.height)
+                                }
+                            }
+
+                            override fun onProfileUpdate(profile: GpuToCpuSurfaceProvider.GlFrameProfile) {
+                                pushEvent(
+                                    "status",
+                                    "glProfile",
+                                    profile.summary(),
+                                    mapOf(
+                                        "frameCount" to frameCount,
+                                        "fps" to profile.achievedPreviewFps.toDouble(),
+                                        "readbackFps" to profile.achievedReadbackFps.toDouble(),
+                                        "profileSummary" to profile.summary(),
+                                    ),
+                                )
+                            }
+                        },
+                )
+            glSurfaceProvider = glProvider
+            preview.setSurfaceProvider(glProvider)
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            stopFpsTimer()
+            provider.unbindAll()
+
+            val cam =
+                provider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    imageCapture!!,
+                )
+            this.camera = cam
+
+            val selectedRange = resolveMaxAeFpsRange(cam)
+            aeTargetFpsRange = selectedRange
+            Log.i(TAG, "AE FPS selected max range: ${selectedRange?.let { "[${it.lower}, ${it.upper}]" } ?: "<none>"}")
+
+            loadStaticColorTransform(cam)
+
+            frameCount = 0
+            lastFpsTime = System.nanoTime()
+            lastFpsFrameCount = 0
+            currentFps = 0.0
+
+            startFpsTimer()
+
+            applyAllCaptureOptions(cam) { error ->
+                if (error != null) {
+                    Log.e(TAG, "Initial capture options apply failed (GL)", error)
+                    callback(null, error)
+                } else {
+                    val payload = if (includeCapabilitiesInResult) gatherStartupInfo(cam) else gatherResolutionInfo()
+                    callback(payload, null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera bind (GL) failed", e)
+            callback(null, e)
+        }
+    }
+
     /** Stop the camera and release resources. */
     fun stopCamera() {
         stopFpsTimer()
+        bitmapCapture?.stop()
+        bitmapCapture = null
+        glSurfaceProvider?.release()
+        glSurfaceProvider = null
         cameraProvider?.unbindAll()
         camera = null
         latestCaptureResult = null
         imageCapture = null
-        imageAnalysis?.clearAnalyzer()
-        imageAnalysis = null
         defaultAeTargetFpsRange = null
         availableAeTargetFpsRanges = emptyArray()
         aeTargetFpsRange = null
@@ -435,17 +665,16 @@ class CameraManager(
         cameraExecutor = null
     }
 
-    // ── Frame processing (native-side only) ─────────────────────────────
+    // ── Frame processing (GPU→CPU readback) ──────────────────────────────
 
-    private fun processFrame(imageProxy: ImageProxy) {
-        try {
-            frameCount++
-
-            val processor = frameProcessor ?: return
-            processor.processFrame(imageProxy = imageProxy, captureResult = latestCaptureResult)
-        } finally {
-            imageProxy.close()
-        }
+    /**
+     * ML inference stub. Replace with real model invocation.
+     * Method 1 passes a [android.graphics.Bitmap] (ARGB_8888, top-left origin).
+     * Method 2 passes a [java.nio.ByteBuffer] (RGBA, bottom-left origin — flip if needed).
+     */
+    @Suppress("UNUSED_PARAMETER")
+    private fun runMlInference(data: Any, width: Int, height: Int) {
+        // TODO: replace with real model
     }
 
     // ── AE FPS range resolution ─────────────────────────────────────────
@@ -663,15 +892,24 @@ class CameraManager(
         formatName: String,
         callback: (Map<String, Any>?, Exception?) -> Unit,
     ) {
-        val pv = previewView ?: return callback(null, IllegalStateException("PreviewView not ready"))
         val provider = cameraProvider ?: return callback(null, IllegalStateException("Camera not ready"))
 
         val prev = captureFormatYuv
         captureFormatYuv = (formatName == "yuv")
         Log.i(TAG, "setCaptureFormat → ${if (captureFormatYuv) "YUV_420_888" else "JPEG"}, rebinding…")
-        rebindUseCases(pv = pv, provider = provider) { info, error ->
-            if (error != null) captureFormatYuv = prev
-            callback(info, error)
+
+        if (USE_GL_METHOD) {
+            val sv = surfaceView ?: return callback(null, IllegalStateException("SurfaceView not ready"))
+            rebindUseCasesWithSurfaceView(sv = sv, provider = provider) { info, error ->
+                if (error != null) captureFormatYuv = prev
+                callback(info, error)
+            }
+        } else {
+            val pv = previewView ?: return callback(null, IllegalStateException("PreviewView not ready"))
+            rebindUseCases(pv = pv, provider = provider) { info, error ->
+                if (error != null) captureFormatYuv = prev
+                callback(info, error)
+            }
         }
     }
 
@@ -798,10 +1036,6 @@ class CameraManager(
         imageCapture?.resolutionInfo?.resolution?.let {
             result["captureWidth"] = it.width
             result["captureHeight"] = it.height
-        }
-        imageAnalysis?.resolutionInfo?.resolution?.let {
-            result["analysisWidth"] = it.width
-            result["analysisHeight"] = it.height
         }
         return result
     }
