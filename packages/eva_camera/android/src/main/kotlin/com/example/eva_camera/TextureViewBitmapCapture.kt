@@ -117,7 +117,7 @@ class TextureViewBitmapCapture(
                 "total=${totalMs}ms fps=${String.format("%.1f", achievedFps)}"
     }
 
-    private val captureThread = HandlerThread("BitmapCapture-${captureWidth}x$captureHeight").also { it.start() }
+    private val captureThread = HandlerThread("BitmapCapture").also { it.start() }
     private val captureHandler = Handler(captureThread.looper)
 
     // Pre-allocate the Bitmap once — no per-frame allocations
@@ -146,9 +146,8 @@ class TextureViewBitmapCapture(
     private fun captureFrame() {
         val frameStart = System.nanoTime()
 
-        val textureView =
-            previewView.getChildAt(0) as? TextureView ?: run {
-                Log.w(TAG, "PreviewView child is not a TextureView — is COMPATIBLE mode set?")
+        val textureView = findTextureView(previewView) ?: run {
+                Log.w(TAG, "No TextureView found in PreviewView — is COMPATIBLE mode set?")
                 return
             }
 
@@ -192,5 +191,16 @@ class TextureViewBitmapCapture(
         private const val TAG = "BitmapCapture"
 
         private fun nsToMs(ns: Long): Float = ns / 1_000_000f
+
+        /** Recursively searches [root]'s view hierarchy for the first [TextureView]. */
+        private fun findTextureView(root: android.view.View): TextureView? {
+            if (root is TextureView) return root
+            if (root is android.view.ViewGroup) {
+                for (i in 0 until root.childCount) {
+                    findTextureView(root.getChildAt(i))?.let { return it }
+                }
+            }
+            return null
+        }
     }
 }

@@ -15,7 +15,7 @@ import android.util.Log
 import android.util.Range
 import android.util.Size
 import android.view.Surface
-import SurfaceView
+import android.view.SurfaceView
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -458,7 +458,6 @@ class CameraManager(
                                         mapOf(
                                             "frameCount" to frameCount,
                                             "fps" to profile.achievedFps.toDouble(),
-                                            "profileSummary" to profile.summary(),
                                         ),
                                     )
                                     runMlInference(bitmap, bitmap.width, bitmap.height)
@@ -581,7 +580,6 @@ class CameraManager(
                                         "frameCount" to frameCount,
                                         "fps" to profile.achievedPreviewFps.toDouble(),
                                         "readbackFps" to profile.achievedReadbackFps.toDouble(),
-                                        "profileSummary" to profile.summary(),
                                     ),
                                 )
                             }
